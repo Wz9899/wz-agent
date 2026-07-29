@@ -1,6 +1,14 @@
-node_modules/
-dist/
+# Python
+__pycache__/
+*.pyc
+venv/
+
+# 敏感信息
 .env
+
+# 日志 & 系统
+*.log
+.DS_Store
 *.log
 .DS_Store
 venv/
