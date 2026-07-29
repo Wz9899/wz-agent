@@ -9,8 +9,9 @@ venv/
 # 日志 & 系统
 *.log
 .DS_Store
-*.log
-.DS_Store
-venv/
-__pycache__/
-*.pyc
+
+# 内部开发文件（保留本地，不上传 GitHub）
+PROGRESS.md
+test_api.py
+AGENTS.md
+docs/agents/
