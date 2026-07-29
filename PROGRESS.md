@@ -22,6 +22,9 @@
 | Python 环境 | `requirements.txt`, `venv/`, `src/` 目录结构 | ✅ |
 | ReAct 循环 v1 | `src/agent/loop.py` — 最简 API 调用（无工具） | ✅ 已验证 |
 | 测试脚本 | `test_api.py` | ✅ 通过 |
+| README | `README.md` | ✅ |
+| 入口脚本 | `src/main.py` | ✅ |
+| 依赖列表 | `requirements.txt` | ✅ |
 
 ## 待完成
 
