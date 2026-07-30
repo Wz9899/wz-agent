@@ -2,14 +2,14 @@
 
 一个从零手搓的通用编码助手——主动追问需求，自动生成代码。
 
-> 🚧 开发中 | 当前版本：v0.1 — ReAct 循环骨架已跑通
+> 🚧 开发中 | 当前版本：v0.2 — ReAct 循环 + 工具调用已实现
 
 ## 功能规划
 
 | 阶段 | 功能 | 状态 |
 |---|---|---|
 | v0.1 | DeepSeek API 连通 | ✅ |
-| v0.2 | ReAct 循环 + 工具调用（read/write/edit/bash） | ⏳ |
+| v0.2 | ReAct 循环 + 工具调用（read/write/edit/bash） | ✅ |
 | v0.3 | 需求澄清 —— Agent 主动追问用户 | ⏳ |
 | v0.4 | 编码执行 —— 根据 Spec 自动生成代码 | ⏳ |
 | v1.0 | CLI 完整交互 + bash 安全模式 | ⏳ |
@@ -59,7 +59,12 @@ wz-agent/
 └── src/
     ├── main.py             # 入口脚本
     └── agent/
-        ├── loop.py         # ReAct 循环引擎
-        ├── tools/          # 工具集（read/write/edit/bash）
+        ├── loop.py         # ReAct 循环引擎（v2：完整工具调用）
+        ├── tools/
+        │   ├── base.py     # 工具抽象基类
+        │   ├── read.py     # 读取文件
+        │   ├── write.py    # 创建/覆盖文件
+        │   ├── edit.py     # 精确文本匹配替换
+        │   └── bash.py     # 执行 Shell 命令
         └── prompts/        # 系统提示词（需求澄清 / 编码执行）
 ```
