@@ -3,12 +3,14 @@
 完整的 ReAct 循环实现，支持工具调用和多步推理。
 """
 
+from __future__ import annotations
+
 import json
 import os
 from openai import OpenAI
 from openai import APIError, APIConnectionError, RateLimitError
 
-from agent.tools import ALL_TOOLS
+from agent.tools import ALL_TOOLS, get_bash_tool
 
 # ============================================================
 # 常量
@@ -25,26 +27,39 @@ client = OpenAI(
     base_url="https://api.deepseek.com",
 )
 
-# 工具 schema 只生成一次，避免每次循环重复计算
-TOOL_SCHEMAS = [tool.to_openai_function() for tool in ALL_TOOLS.values()]
+# 注意：工具 schema 不再设为模块级常量 ——
+# bash 工具的 description 会随 mode 变化而改变，
+# 每次 run() 时重新生成以反映当前安全模式。
+# 性能影响可忽略（4 个工具的反射远快于一次 API 调用）。
 
 # ============================================================
 # ReAct 循环
 # ============================================================
 
 
-def run(system_prompt: str, user_message: str, max_steps: int = 10) -> str:
+def run(
+    system_prompt: str,
+    user_message: str,
+    max_steps: int = 10,
+    bash_safety_mode: str = "auto",
+) -> str:
     """
     执行 ReAct 循环：思考 → 行动 → 观察 → 再思考，直到任务完成。
 
     参数:
-        system_prompt: 系统提示词，定义 agent 的行为规则
-        user_message:  用户输入的任务描述
-        max_steps:     最大工具调用次数（硬上限，防止死循环），默认 10
+        system_prompt:    系统提示词，定义 agent 的行为规则。
+        user_message:     用户输入的任务描述。
+        max_steps:        最大工具调用次数（硬上限，防止死循环），默认 10。
+        bash_safety_mode: Bash 安全模式 —— 'auto'（直接执行）或 'plan'（先收集后确认执行）。
 
     返回:
-        模型的最终文本回复；如因异常提前终止则返回错误描述
+        模型的最终文本回复；如因异常提前终止则返回错误描述。
     """
+    # ---- 0. 设置 bash 安全模式并生成工具 schema ----
+    bash_tool = get_bash_tool()
+    bash_tool.mode = bash_safety_mode
+    tool_schemas = [tool.to_openai_function() for tool in ALL_TOOLS.values()]
+
     # ---- 1. 初始化对话历史 ----
     messages: list[dict] = [
         {"role": "system", "content": system_prompt},
@@ -59,16 +74,16 @@ def run(system_prompt: str, user_message: str, max_steps: int = 10) -> str:
             response = client.chat.completions.create(
                 model="deepseek-chat",
                 messages=messages,
-                tools=TOOL_SCHEMAS,
+                tools=tool_schemas,
             )
         except RateLimitError:
-            return "❌ API 调用失败：请求频率超过限制（429），请稍后重试。"
+            return "[ERR] API 调用失败：请求频率超过限制（429），请稍后重试。"
         except APIConnectionError:
-            return "❌ API 调用失败：网络连接错误，请检查网络后重试。"
+            return "[ERR] API 调用失败：网络连接错误，请检查网络后重试。"
         except APIError as e:
-            return f"❌ API 调用失败：{e}"
+            return f"[ERR] API 调用失败：{e}"
         except Exception as e:
-            return f"❌ 调用 LLM 时发生未预期错误：{e}"
+            return f"[ERR] 调用 LLM 时发生未预期错误：{e}"
 
         msg = response.choices[0].message
 
@@ -117,4 +132,4 @@ def run(system_prompt: str, user_message: str, max_steps: int = 10) -> str:
             return msg.content or ""
 
     # ---- 4. 达到步数上限 ----
-    return f"⚠️ 已达到最大步数限制（{max_steps} 步），Agent 未完成任务。"
+    return f"[WARN] 已达到最大步数限制（{max_steps} 步），Agent 未完成任务。"
