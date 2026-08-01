@@ -20,12 +20,26 @@ from agent.tools import ALL_TOOLS, get_bash_tool
 MAX_TOOL_RESULT_CHARS: int = 2000
 
 # ============================================================
-# 初始化 DeepSeek 客户端
+# DeepSeek 客户端（惰性初始化）
 # ============================================================
-client = OpenAI(
-    api_key=os.environ.get("DEEPSEEK_API_KEY", "sk-xxx"),
-    base_url="https://api.deepseek.com",
-)
+
+# client 不在 import 时创建：模块加载时 os.environ 可能还没有加载 .env
+# （如 main.py 在 import agent 之后才调用 load_dotenv()）。若此时用占位符
+# sk-xxx 构造 client，之后 load_dotenv() 也不会更新已创建的实例，导致
+# .env 配置的 key 永远不生效。改为首次调用时再读取环境变量。
+_client: OpenAI | None = None
+
+
+def _get_client() -> OpenAI:
+    """惰性获取 OpenAI 客户端（首次调用时构造，之后复用）。"""
+    global _client
+    if _client is None:
+        _client = OpenAI(
+            api_key=os.environ.get("DEEPSEEK_API_KEY", "sk-xxx"),
+            base_url="https://api.deepseek.com",
+        )
+    return _client
+
 
 # 注意：工具 schema 不再设为模块级常量 ——
 # bash 工具的 description 会随 mode 变化而改变，
@@ -73,9 +87,12 @@ def run_with_retry(
     带自动修复的 ReAct 循环：失败时把错误详情回喂给 LLM 继续修复。
 
     触发重试的条件：一轮执行返回的结果以 '[ERR]' 或 '[WARN]' 开头
-    （API 调用失败、工具执行异常、达到步数上限）。
-    此时把失败详情作为新的用户消息让 LLM 分析原因并修复，
-    最多重试 max_retries 次（默认 3）。
+    （工具执行异常、达到步数上限）。此时把失败详情作为新的用户消息
+    让 LLM 分析原因并修复，最多重试 max_retries 次（默认 3）。
+
+    不重试的条件：结果以 '[API-ERR]' 开头 —— 429 限流、网络断开、
+    API 服务端错误等属于基础设施故障，LLM 无法通过修改代码修复，
+    重试只会浪费轮次，直接原样返回。
 
     参数:
         system_prompt:    系统提示词。
@@ -85,7 +102,7 @@ def run_with_retry(
         max_retries:      失败后的最大自动修复次数，默认 3。
 
     返回:
-        成功的最终回复；重试用尽后返回错误描述（含最后一次失败详情）。
+        成功的最终回复；不可修复的 API 错误或重试用尽时返回错误描述。
     """
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
 
@@ -108,6 +125,10 @@ def run_with_retry(
             bash_safety_mode=bash_safety_mode,
             max_steps=max_steps,
         )
+
+        # API 层错误（限流/断网/服务端）—— LLM 修不了，直接返回不重试
+        if result.startswith("[API-ERR]"):
+            return result
 
         # 成功（非 [ERR]/[WARN] 开头）—— 立即返回
         if not result.startswith("[ERR]") and not result.startswith("[WARN]"):
@@ -147,19 +168,19 @@ def _run_loop(
     while step < max_steps:
         # ---- 2. 调用 LLM（带工具 schema）----
         try:
-            response = client.chat.completions.create(
+            response = _get_client().chat.completions.create(
                 model="deepseek-chat",
                 messages=messages,
                 tools=tool_schemas,
             )
         except RateLimitError:
-            return "[ERR] API 调用失败：请求频率超过限制（429），请稍后重试。"
+            return "[API-ERR] API 调用失败：请求频率超过限制（429），请稍后重试。"
         except APIConnectionError:
-            return "[ERR] API 调用失败：网络连接错误，请检查网络后重试。"
+            return "[API-ERR] API 调用失败：网络连接错误，请检查网络后重试。"
         except APIError as e:
-            return f"[ERR] API 调用失败：{e}"
+            return f"[API-ERR] API 调用失败：{e}"
         except Exception as e:
-            return f"[ERR] 调用 LLM 时发生未预期错误：{e}"
+            return f"[API-ERR] 调用 LLM 时发生未预期错误：{e}"
 
         msg = response.choices[0].message
 

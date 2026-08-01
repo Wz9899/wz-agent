@@ -15,8 +15,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-# .scratch/ 根目录名（固定在项目根目录下）
-SCRATCH_DIRNAME: str = ".scratch"
+from agent.paths import PROJECT_ROOT, SCRATCH_DIRNAME
 
 # 五个标准 triage 标签（与 docs/agents/triage-labels.md 保持一致）
 VALID_LABELS: tuple[str, ...] = (
@@ -26,9 +25,6 @@ VALID_LABELS: tuple[str, ...] = (
     "ready-for-human",
     "wontfix",
 )
-
-# 项目根目录 = src/agent/ 的上一级的上一级
-PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent.parent
 
 # 匹配 "Status: xxx" 行（行首，允许多余空白）
 _STATUS_RE = re.compile(r"^Status:\s*(.+?)\s*$", re.MULTILINE)
@@ -94,25 +90,47 @@ def next_issue_number(slug: str) -> int:
 def issue_path(slug: str, issue: str) -> Path | None:
     """根据 issue 引用解析出完整文件路径。
 
-    支持的引用格式（均可）:
-        - "01"          → 数字前缀匹配
-        - "01-auth"     → stem 前缀匹配
-        - "01-auth.md"  → 完整文件名
+    支持的引用格式（按优先级）:
+        - "01-auth.md"  → 完整文件名精确匹配
+        - "01-auth"     → stem 精确匹配
+        - "01"          → 编号前缀匹配（要求唯一命中）
 
-    返回 None 表示未找到匹配的 issue 文件。
+    解析规则:
+        1. 先尝试精确匹配（完整文件名 / stem），避免 "01-auth" 误命中 "01-auth-flow"。
+        2. 无精确匹配时退化为前缀匹配；若多个文件命中则抛 ValueError（歧义，
+           绝不静默选第一个）。
+
+    返回:
+        匹配的 issue 文件路径。
+
+    抛出:
+        ValueError: 引用匹配到多个文件，存在歧义。
     """
     d = issues_dir(slug)
     if not d.is_dir():
         return None
 
     target = issue.strip()
-    # 纯数字引用补一个 "-" 前缀，避免 "1" 同时命中 "01-xxx" 和 "10-xxx"
-    if target.isdigit():
-        target = target + "-"
+    files = [p for p in d.iterdir() if p.suffix == ".md"]
 
-    for p in d.iterdir():
-        if p.suffix == ".md" and p.name.startswith(target):
+    # ---- 1. 精确匹配（文件名 / stem）----
+    for p in files:
+        if p.name == target or p.stem == target:
             return p
+
+    # ---- 2. 编号/前缀匹配：收集所有命中，要求唯一 ----
+    # 纯数字引用补 "-" 前缀，避免 "1" 同时命中 "01-xxx" 和 "10-xxx"
+    prefix = target + "-" if target.isdigit() else target
+    matches = [p for p in files if p.name.startswith(prefix)]
+
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise ValueError(
+            f"issue 引用 '{issue}' 匹配到多个文件，存在歧义: "
+            + ", ".join(sorted(p.name for p in matches))
+            + "。请用完整文件名精确指定。"
+        )
     return None
 
 
@@ -238,10 +256,17 @@ def resolve_spec_target(target: str) -> tuple[str, Path]:
 
     # 当作 feature-slug：读 .scratch/<slug>/spec.md
     sp = spec_path(target)
-    if not sp.is_file():
-        raise FileNotFoundError(
-            f"未找到 spec 文件：{sp}\n"
-            f"请先运行需求澄清阶段把 spec 放到该位置，"
-            f"或直接传 spec 文件路径（python src/main.py to-tickets <spec路径>）。"
-        )
-    return target, sp
+    if sp.is_file():
+        return target, sp
+
+    # fallback：feature 级 spec 不存在时，回退到项目根 spec.md
+    # （v1.0 澄清阶段把 spec 写到项目根，v2.0 拆解阶段也应收得到这份 spec）
+    root_spec = PROJECT_ROOT / "spec.md"
+    if root_spec.is_file():
+        return target, root_spec
+
+    raise FileNotFoundError(
+        f"未找到 spec 文件：{sp}（也未见项目根 spec.md）\n"
+        f"请先运行需求澄清阶段把 spec 放到其中一处，"
+        f"或直接传 spec 文件路径（python src/main.py to-tickets <spec路径>）。"
+    )

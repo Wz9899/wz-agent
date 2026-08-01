@@ -65,7 +65,11 @@ class SetIssueStatusTool(BaseTool):
             label: 目标分诊标签。
             comment: 判定理由（可选，追加到 ## Comments）。
         """
-        path = issues.issue_path(feature, issue)
+        try:
+            path = issues.issue_path(feature, issue)
+        except ValueError as e:
+            # 引用命中多个文件，存在歧义 —— 让 LLM 换用完整文件名
+            return f"[ERR] {e}"
         if path is None:
             return f"[ERR] 在 feature '{feature}' 中找不到 issue '{issue}'"
         return issues.set_status(path, label, comment)

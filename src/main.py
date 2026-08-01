@@ -27,12 +27,14 @@ from rich.panel import Panel
 # 把 src 加入路径（支持从项目根目录运行）
 # 同时把工作目录锚定到项目根 —— 所有相对路径（工具 write/read、spec.md、
 # .scratch/）都以项目根为基准，从任何目录启动行为一致。
+# 注意：此处的 PROJECT_ROOT 必须在 import agent 之前算好（sys.path 需要它），
+# 故不复用 agent.paths.PROJECT_ROOT；两者指向同一目录。
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 os.chdir(PROJECT_ROOT)
 
 from agent import issues
-from agent.context import ensure_spec, spec_exists
+from agent.context import MISSING_SPEC_MESSAGE, ensure_spec, spec_exists
 from agent.loop import run, run_with_retry
 from agent.prompts import (
     CLARIFY_SYSTEM_PROMPT,
@@ -59,21 +61,40 @@ def _check_api_key() -> bool:
 
 
 # ============================================================
-# v2.0 子命令：triage
+# v2.0 子命令
 # ============================================================
+
+
+def _run_agent(title: str, system_prompt: str, task: str, safety_mode: str) -> None:
+    """校验 API key、跑带重试的 ReAct 循环、输出结果 Panel。
+
+    _run_triage / _run_to_tickets 共享的控制流：目标解析各自做，解析成功
+    后才到这里 —— 目标解析错误优先于缺 key 提示。
+    """
+    if not _check_api_key():
+        raise SystemExit(1)
+
+    with console.status(f"[bold green]{title}"):
+        result = run_with_retry(
+            system_prompt,
+            task,
+            bash_safety_mode=safety_mode,
+        )
+    console.print(Panel(result, title="wz-agent 结果"))
 
 
 def _run_triage(target: str, safety_mode: str) -> None:
     """分诊一个 feature（全部 issues）或单个 issue 文件。"""
     feature, issue_ref = issues.resolve_issue_target(target)
 
-    # spec 校验之后才需要 LLM —— 目标解析错误优先于缺 key 提示
-    if not _check_api_key():
-        raise SystemExit(1)
-
     if issue_ref:
         # 定位到具体 issue：读取当前状态注入任务描述
-        path = issues.issue_path(feature, issue_ref)
+        try:
+            path = issues.issue_path(feature, issue_ref)
+        except ValueError as e:
+            # issue 引用存在歧义（命中多个文件）—— 拒绝静默选一个
+            console.print(Panel.fit(f"[bold red]{e}[/]", title="wz-agent triage"))
+            raise SystemExit(1)
         status = issues.get_status(path) if path else None
         task = (
             f"请分诊 feature '{feature}' 下的 issue '{issue_ref}'。\n"
@@ -87,18 +108,7 @@ def _run_triage(target: str, safety_mode: str) -> None:
             "先用 list_issues 查看全貌，再逐个处理。"
         )
 
-    with console.status(f"[bold green]Agent 分诊中... ({feature})"):
-        result = run_with_retry(
-            TRIAGE_SYSTEM_PROMPT,
-            task,
-            bash_safety_mode=safety_mode,
-        )
-    console.print(Panel(result, title="wz-agent triage 结果"))
-
-
-# ============================================================
-# v2.0 子命令：to-tickets
-# ============================================================
+    _run_agent(f"Agent 分诊中... ({feature})", TRIAGE_SYSTEM_PROMPT, task, safety_mode)
 
 
 def _run_to_tickets(target: str, safety_mode: str) -> None:
@@ -109,10 +119,6 @@ def _run_to_tickets(target: str, safety_mode: str) -> None:
         console.print(Panel.fit(f"[bold red]{e}[/]", title="wz-agent to-tickets"))
         raise SystemExit(1)
 
-    # spec 校验之后才需要 LLM —— 目标解析错误优先于缺 key 提示
-    if not _check_api_key():
-        raise SystemExit(1)
-
     spec_content = spec_file.read_text(encoding="utf-8")
     task = (
         f"请把以下 spec 拆解成垂直切片 tickets，写入 "
@@ -121,13 +127,7 @@ def _run_to_tickets(target: str, safety_mode: str) -> None:
         f"===== spec（{spec_file}） =====\n{spec_content}"
     )
 
-    with console.status(f"[bold green]Agent 拆解任务中... ({feature})"):
-        result = run_with_retry(
-            TO_TICKETS_SYSTEM_PROMPT,
-            task,
-            bash_safety_mode=safety_mode,
-        )
-    console.print(Panel(result, title="wz-agent to-tickets 结果"))
+    _run_agent(f"Agent 拆解任务中... ({feature})", TO_TICKETS_SYSTEM_PROMPT, task, safety_mode)
 
 
 # ============================================================
@@ -194,12 +194,7 @@ def main(args: tuple[str, ...], safety_mode: str, phase: str) -> None:
     if phase == "code" and not spec_exists():
         console.print(
             Panel.fit(
-                "[bold red]缺少 spec.md[/]\n\n"
-                "编码执行阶段需要 spec.md 作为唯一输入。\n"
-                "请先运行需求澄清阶段：\n"
-                '[cyan]python src/main.py "你的需求"[/]\n\n'
-                "确认 spec.md 内容无误后，再运行：\n"
-                '[cyan]python src/main.py --phase code "请根据 spec.md 实现项目"[/]',
+                f"[bold red]缺少 spec.md[/]\n\n{MISSING_SPEC_MESSAGE}",
                 title="wz-agent v2.0",
             )
         )
