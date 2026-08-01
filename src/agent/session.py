@@ -33,6 +33,12 @@ CODE_TRIGGERS: frozenset[str] = frozenset({
 # 退出词
 EXIT_WORDS: frozenset[str] = frozenset({"exit", "quit", "q", "退出"})
 
+# 表示"需求已完整、无需补充"的结束性表达（需求确认环节识别）
+_DONE_PHRASES: tuple[str, ...] = (
+    "没有补充", "不用补充", "不需要补充", "不用了", "不需要了", "没有了", "没了",
+    "就这样", "够了", "可以了", "就这些", "暂时没有", "没有需求", "需求完整", "结束了",
+)
+
 # 会话内单轮最大工具调用步数（澄清多轮问答 + 写 spec / 编码分模块都需余量）
 SESSION_MAX_STEPS: int = 30
 
@@ -40,11 +46,25 @@ SESSION_MAX_STEPS: int = 30
 def is_code_intent(line: str) -> bool:
     """用户输入是否为"开始编码"意图。
 
-    去掉首尾空白与句尾标点后，与触发词做精确匹配——避免"帮我实现一个游戏"
-    这类长描述被误判为编码意图。
+    两种形态都算：
+    1. 精确匹配触发词（"编码"、"实现"、"code"）
+    2. 短指令（≤8 字，如"开始编码吧"、"去实现"）且含触发词
+    长需求描述（如"帮我实现一个游戏"）不会被误判为编码意图。
     """
-    text = line.strip().rstrip("。！! ")
-    return text.lower() in CODE_TRIGGERS
+    text = line.strip().rstrip("。！!吧 ")
+    if text.lower() in CODE_TRIGGERS:
+        return True
+    if len(text) <= 8 and any(t in text for t in CODE_TRIGGERS):
+        return True
+    return False
+
+
+def _is_done_requirements(text: str) -> bool:
+    """识别"需求已完整、无需补充"的表达（需求确认环节）。
+
+    用较长的结束性短语匹配，避免"没有做计分系统"这类补充内容被误判。
+    """
+    return any(p in text for p in _DONE_PHRASES)
 
 
 def _print_help() -> None:
@@ -122,6 +142,16 @@ def _confirm_requirements(safety_mode: str, stream: bool) -> None:
         if not extra.strip():
             console.print("[bold green]需求确认完毕。输入 [cyan]编码[/] 开始实现。[/]")
             return
+        # 用户明确要开始编码 → 直接进入编码，不当作补充需求
+        if is_code_intent(extra):
+            console.print("[bold green]需求确认完毕，开始编码。[/]")
+            run_code(extra, safety_mode, stream)
+            return
+        # 用户说"没有补充了/就这样" → 退出确认环节
+        if _is_done_requirements(extra):
+            console.print("[bold green]需求确认完毕。输入 [cyan]编码[/] 开始实现。[/]")
+            return
+        # 否则当作补充需求整合进 spec.md
         runtime.write_transcript(f"用户补充: {extra}\n")
         console.print("[bold green]正在把补充整合进 spec.md...[/]")
         task = (
