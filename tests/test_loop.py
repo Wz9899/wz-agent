@@ -83,3 +83,67 @@ def test_compact_keeps_assistant_tool_pairs(monkeypatch):
     for i in range(0, len(roles), 2):
         assert roles[i] == "assistant"
         assert roles[i + 1] == "tool"
+
+
+# ---------- 流式累积 _accumulate_stream ----------
+
+
+class _D:
+    """极简属性容器，模拟 openai 流式 chunk 对象。"""
+
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+
+def _chunk(delta):
+    """构造一个含单个 choice 的流式 chunk。"""
+    return _D(choices=[_D(delta=delta)])
+
+
+def _tcall(index, id=None, name=None, arguments=None):
+    """构造一个工具调用增量。"""
+    return _D(
+        index=index,
+        id=id,
+        function=_D(name=name, arguments=arguments),
+    )
+
+
+def test_accumulate_plain_text():
+    content, calls = loop._accumulate_stream([
+        _chunk(_D(content="你", tool_calls=None)),
+        _chunk(_D(content="好", tool_calls=None)),
+    ])
+    assert content == "你好"
+    assert calls == []
+
+
+def test_accumulate_tool_call_split_across_chunks():
+    """工具调用 name/arguments 分片传输时能正确拼接。"""
+    chunks = [
+        _chunk(_D(content=None, tool_calls=[_tcall(0, id="call_1", name="read", arguments='{"path": "')])),
+        _chunk(_D(content=None, tool_calls=[_tcall(0, arguments='spec.md"}')])),
+    ]
+    content, calls = loop._accumulate_stream(chunks)
+    assert content == ""
+    assert calls == [{
+        "id": "call_1",
+        "type": "function",
+        "function": {"name": "read", "arguments": '{"path": "spec.md"}'},
+    }]
+
+
+def test_accumulate_multiple_tool_calls_ordered():
+    """多个工具调用按 index 排序输出。"""
+    chunks = [
+        _chunk(_D(content=None, tool_calls=[_tcall(1, id="b", name="write", arguments="{}")])),
+        _chunk(_D(content=None, tool_calls=[_tcall(0, id="a", name="read", arguments="{}")])),
+    ]
+    content, calls = loop._accumulate_stream(chunks)
+    assert [c["function"]["name"] for c in calls] == ["read", "write"]
+
+
+def test_accumulate_skips_empty_choices():
+    content, calls = loop._accumulate_stream([_D(choices=[])])
+    assert content == "" and calls == []

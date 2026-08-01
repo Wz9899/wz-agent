@@ -118,12 +118,89 @@ def _maybe_compact(messages: list[dict]) -> None:
 # ReAct 循环
 # ============================================================
 
+# ============================================================
+# 流式输出
+# ============================================================
+
+
+def _accumulate_stream(chunks) -> tuple[str, list[dict]]:
+    """把流式 chunk 序列累积为 (文本内容, 工具调用列表)。
+
+    chunk 约定：具有 .choices[0].delta，delta 有 .content 与 .tool_calls
+    （tool_calls 元素有 .index / .id / .function.{name, arguments}）。
+    用极简 stub 对象即可驱动本函数，不依赖 openai SDK 具体类型。
+
+    工具调用的 name / arguments 可能跨多个 chunk 分片传输，按 index 累积
+    后拼接；返回的列表按 index 排序，结构与 openai 非流式响应的
+    tool_calls 一致，便于下游统一处理。
+    """
+    content_parts: list[str] = []
+    tool_calls: dict[int, dict] = {}
+
+    for chunk in chunks:
+        if not getattr(chunk, "choices", None):
+            continue
+        delta = chunk.choices[0].delta
+        content = getattr(delta, "content", None)
+        if content:
+            content_parts.append(content)
+        for tc in (getattr(delta, "tool_calls", None) or []):
+            entry = tool_calls.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
+            if getattr(tc, "id", None):
+                entry["id"] = tc.id
+            fn = getattr(tc, "function", None)
+            if fn is not None:
+                if getattr(fn, "name", None):
+                    entry["name"] += fn.name
+                if getattr(fn, "arguments", None):
+                    entry["arguments"] += fn.arguments
+
+    content = "".join(content_parts)
+    calls: list[dict] = []
+    for idx in sorted(tool_calls):
+        tc = tool_calls[idx]
+        calls.append({
+            "id": tc["id"],
+            "type": "function",
+            "function": {"name": tc["name"], "arguments": tc["arguments"]},
+        })
+    return content, calls
+
+
+def _call_stream(
+    client,
+    *,
+    messages: list[dict],
+    tool_schemas: list[dict],
+) -> tuple[str, list[dict]]:
+    """流式调用 LLM，返回 (文本内容, 工具调用列表)。
+
+    副作用：把 LLM 返回的文本增量实时打印到控制台（end="" + flush），
+    让用户能看到 agent 的思考过程。工具调用与执行结果由 _run_loop 打印。
+    """
+    response = client.chat.completions.create(
+        model="deepseek-chat",
+        messages=messages,
+        tools=tool_schemas,
+        stream=True,
+    )
+
+    chunks: list = []
+    for chunk in response:
+        chunks.append(chunk)
+        # 文本增量实时打印（同时保存 chunk 用于累积）
+        if chunk.choices and chunk.choices[0].delta.content:
+            print(chunk.choices[0].delta.content, end="", flush=True)
+
+    return _accumulate_stream(chunks)
+
 
 def run(
     system_prompt: str,
     user_message: str,
     max_steps: int = 10,
     bash_safety_mode: str = "auto",
+    stream: bool = False,
 ) -> str:
     """
     执行单轮 ReAct 循环：思考 → 行动 → 观察 → 再思考，直到任务完成。
@@ -133,6 +210,8 @@ def run(
         user_message:     用户输入的任务描述。
         max_steps:        最大工具调用次数（硬上限，防止死循环），默认 10。
         bash_safety_mode: Bash 安全模式 —— 'auto'（直接执行）或 'plan'（先收集后确认执行）。
+        stream:           是否流式输出 —— True 时 LLM 回复与工具调用过程
+                          实时打印到控制台，便于观察与随时中断。
 
     返回:
         模型的最终文本回复；如因异常提前终止则返回错误描述。
@@ -141,7 +220,12 @@ def run(
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_message},
     ]
-    return _run_loop(messages, bash_safety_mode=bash_safety_mode, max_steps=max_steps)
+    return _run_loop(
+        messages,
+        bash_safety_mode=bash_safety_mode,
+        max_steps=max_steps,
+        stream=stream,
+    )
 
 
 def run_with_retry(
@@ -150,6 +234,7 @@ def run_with_retry(
     max_steps: int = 10,
     bash_safety_mode: str = "auto",
     max_retries: int = 3,
+    stream: bool = False,
 ) -> str:
     """
     带自动修复的 ReAct 循环：失败时把错误详情回喂给 LLM 继续修复。
@@ -168,6 +253,7 @@ def run_with_retry(
         max_steps:        每轮 ReAct 循环的最大工具调用次数。
         bash_safety_mode: Bash 安全模式。
         max_retries:      失败后的最大自动修复次数，默认 3。
+        stream:           是否流式输出 —— True 时实时打印过程，便于观察。
 
     返回:
         成功的最终回复；不可修复的 API 错误或重试用尽时返回错误描述。
@@ -192,6 +278,7 @@ def run_with_retry(
             messages,
             bash_safety_mode=bash_safety_mode,
             max_steps=max_steps,
+            stream=stream,
         )
 
         # API 层错误（限流/断网/服务端）—— LLM 修不了，直接返回不重试
@@ -213,6 +300,7 @@ def _run_loop(
     messages: list[dict],
     bash_safety_mode: str = "auto",
     max_steps: int = 10,
+    stream: bool = False,
 ) -> str:
     """
     单轮 ReAct 循环核心：在给定的消息列表上持续调用 LLM，直到任务完成。
@@ -222,6 +310,7 @@ def _run_loop(
                           由调用方负责构建，调用后可继续复用（用于重试）。
         bash_safety_mode: Bash 安全模式 —— 'auto'（直接执行）或 'plan'（先收集后确认执行）。
         max_steps:        最大工具调用次数（硬上限，防止死循环）。
+        stream:           是否流式输出 —— True 时实时打印 LLM 文本与工具调用过程。
 
     返回:
         模型的最终文本回复；如因异常提前终止则返回错误描述。
@@ -236,11 +325,28 @@ def _run_loop(
     while step < max_steps:
         # ---- 2. 调用 LLM（带工具 schema）----
         try:
-            response = _get_client().chat.completions.create(
-                model="deepseek-chat",
-                messages=messages,
-                tools=tool_schemas,
-            )
+            if stream:
+                content, tool_calls = _call_stream(
+                    _get_client(),
+                    messages=messages,
+                    tool_schemas=tool_schemas,
+                )
+            else:
+                response = _get_client().chat.completions.create(
+                    model="deepseek-chat",
+                    messages=messages,
+                    tools=tool_schemas,
+                )
+                msg = response.choices[0].message
+                content = msg.content or ""
+                tool_calls = [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                    }
+                    for tc in (msg.tool_calls or [])
+                ]
         except RateLimitError:
             return "[API-ERR] API 调用失败：请求频率超过限制（429），请稍后重试。"
         except APIConnectionError:
@@ -250,35 +356,49 @@ def _run_loop(
         except Exception as e:
             return f"[API-ERR] 调用 LLM 时发生未预期错误：{e}"
 
-        msg = response.choices[0].message
-
         # ---- 3. 分支：工具调用 vs 纯文本回复 ----
-        if msg.tool_calls:
-            # 3a. 记录 assistant 消息（含 tool_calls）到对话历史
-            #     exclude_none=True 避免把 null 字段（如 content=None）写入消息
-            messages.append(msg.model_dump(exclude_none=True))
+        if tool_calls:
+            if stream:
+                print()  # 结束上一段流式文本行
 
-            for tool_call in msg.tool_calls:
+            # 3a. 记录 assistant 消息（含 tool_calls）到对话历史
+            #     空字段（如 content=None）不写入消息
+            assistant_msg = {
+                "role": "assistant",
+                "content": content or None,
+                "tool_calls": tool_calls,
+            }
+            messages.append({k: v for k, v in assistant_msg.items() if v is not None})
+
+            for call in tool_calls:
                 # 硬上限：即使在同一个 API 回复中也不可突破
                 if step >= max_steps:
                     break
 
                 step += 1
-                tool_name = tool_call.function.name
-                tool_args = json.loads(tool_call.function.arguments)
+                tool_name = call["function"]["name"]
+                tool_args = json.loads(call["function"]["arguments"])
 
-                # 3b. 查找工具
+                # 3b. 流式模式：先展示本次工具调用
+                #     注意用 ASCII 箭头 '->' —— Windows GBK 控制台无法编码 '→'/'↳'
+                if stream:
+                    print(
+                        f"  -> 工具 {tool_name}({json.dumps(tool_args, ensure_ascii=False)[:160]})",
+                        flush=True,
+                    )
+
+                # 3c. 查找并执行工具
                 tool = ALL_TOOLS.get(tool_name)
                 if tool is None:
                     tool_result = f"错误：未知工具 —— {tool_name}"
                 else:
-                    # 3c. 执行工具（包裹 try-catch 防止工具异常导致 Agent 崩溃）
+                    # 3d. 执行工具（包裹 try-catch 防止工具异常导致 Agent 崩溃）
                     try:
                         tool_result = tool.run(**tool_args)
                     except Exception as e:
                         tool_result = f"错误：工具 '{tool_name}' 执行异常 —— {e}"
 
-                # 3d. 截断过长的结果，保留原始长度信息
+                # 3e. 截断过长的结果，保留原始长度信息
                 total_len = len(tool_result)
                 if total_len > MAX_TOOL_RESULT_CHARS:
                     tool_result = (
@@ -286,18 +406,23 @@ def _run_loop(
                         + f"\n\n...（工具输出共 {total_len} 字符，已截断至前 {MAX_TOOL_RESULT_CHARS} 字符）"
                     )
 
-                # 3e. 把工具执行结果加入对话历史
+                # 3f. 流式模式：展示结果摘要（首行 + 截断），让用户看到 agent 观察到什么
+                if stream:
+                    preview = tool_result.strip().split("\n")[0][:200]
+                    print(f"  -> 结果 {preview}", flush=True)
+
+                # 3g. 把工具执行结果加入对话历史
                 messages.append({
                     "role": "tool",
-                    "tool_call_id": tool_call.id,
+                    "tool_call_id": call["id"],
                     "content": tool_result,
                 })
 
-                # 3f. 历史超预算时压缩早期轮次，防止长任务上下文无限膨胀
+                # 3h. 历史超预算时压缩早期轮次，防止长任务上下文无限膨胀
                 _maybe_compact(messages)
         else:
-            # 3f. 纯文本回复 —— 任务完成
-            return msg.content or ""
+            # 3i. 纯文本回复 —— 任务完成
+            return content
 
     # ---- 4. 达到步数上限 ----
     return f"[WARN] 已达到最大步数限制（{max_steps} 步），Agent 未完成任务。"

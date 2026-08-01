@@ -65,25 +65,45 @@ def _check_api_key() -> bool:
 # ============================================================
 
 
-def _run_agent(title: str, system_prompt: str, task: str, safety_mode: str) -> None:
-    """校验 API key、跑带重试的 ReAct 循环、输出结果 Panel。
+def _run_agent(
+    title: str,
+    system_prompt: str,
+    task: str,
+    safety_mode: str,
+    stream: bool,
+) -> None:
+    """校验 API key、跑带重试的 ReAct 循环、输出结果。
 
     _run_triage / _run_to_tickets 共享的控制流：目标解析各自做，解析成功
     后才到这里 —— 目标解析错误优先于缺 key 提示。
+
+    stream=True 时：agent 的思考与工具调用过程实时打印到控制台，结束只给
+    简短提示（结果已逐字显示，不再重复输出 Panel）。
+    stream=False 时：保留 status spinner + 结果 Panel 的旧行为。
     """
     if not _check_api_key():
         raise SystemExit(1)
 
-    with console.status(f"[bold green]{title}"):
+    if stream:
+        console.print(f"[bold green]{title}[/]")
         result = run_with_retry(
             system_prompt,
             task,
             bash_safety_mode=safety_mode,
+            stream=True,
         )
-    console.print(Panel(result, title="wz-agent 结果"))
+        console.print("\n[bold green]✅ 完成[/]")
+    else:
+        with console.status(f"[bold green]{title}"):
+            result = run_with_retry(
+                system_prompt,
+                task,
+                bash_safety_mode=safety_mode,
+            )
+        console.print(Panel(result, title="wz-agent 结果"))
 
 
-def _run_triage(target: str, safety_mode: str) -> None:
+def _run_triage(target: str, safety_mode: str, stream: bool) -> None:
     """分诊一个 feature（全部 issues）或单个 issue 文件。"""
     feature, issue_ref = issues.resolve_issue_target(target)
 
@@ -108,10 +128,10 @@ def _run_triage(target: str, safety_mode: str) -> None:
             "先用 list_issues 查看全貌，再逐个处理。"
         )
 
-    _run_agent(f"Agent 分诊中... ({feature})", TRIAGE_SYSTEM_PROMPT, task, safety_mode)
+    _run_agent(f"Agent 分诊中... ({feature})", TRIAGE_SYSTEM_PROMPT, task, safety_mode, stream)
 
 
-def _run_to_tickets(target: str, safety_mode: str) -> None:
+def _run_to_tickets(target: str, safety_mode: str, stream: bool) -> None:
     """把 spec 拆成垂直切片 tickets。"""
     try:
         feature, spec_file = issues.resolve_spec_target(target)
@@ -127,7 +147,7 @@ def _run_to_tickets(target: str, safety_mode: str) -> None:
         f"===== spec（{spec_file}） =====\n{spec_content}"
     )
 
-    _run_agent(f"Agent 拆解任务中... ({feature})", TO_TICKETS_SYSTEM_PROMPT, task, safety_mode)
+    _run_agent(f"Agent 拆解任务中... ({feature})", TO_TICKETS_SYSTEM_PROMPT, task, safety_mode, stream)
 
 
 # ============================================================
@@ -151,10 +171,22 @@ def _run_to_tickets(target: str, safety_mode: str) -> None:
     show_default=True,
     help="执行阶段: clarify=需求澄清, code=编码执行",
 )
-def main(args: tuple[str, ...], safety_mode: str, phase: str) -> None:
+@click.option(
+    "--no-stream",
+    is_flag=True,
+    default=False,
+    help="关闭流式输出（等待完整结果后一次性返回）",
+)
+def main(
+    args: tuple[str, ...],
+    safety_mode: str,
+    phase: str,
+    no_stream: bool,
+) -> None:
     """wz-agent — 通用编码助手：主动追问需求，自动生成代码。"""
 
     args = list(args)
+    stream = not no_stream
 
     # ---- 0. v2.0 子命令分发（triage / to-tickets）----
     if args and args[0] in SUBCOMMANDS:
@@ -170,9 +202,9 @@ def main(args: tuple[str, ...], safety_mode: str, phase: str) -> None:
             raise SystemExit(1)
         target = args[0]
         if sub == "triage":
-            _run_triage(target, safety_mode)
+            _run_triage(target, safety_mode, stream)
         else:
-            _run_to_tickets(target, safety_mode)
+            _run_to_tickets(target, safety_mode, stream)
         return
 
     # ---- 1. 参数校验：缺少任务描述时打印用法 ----
@@ -212,12 +244,14 @@ def main(args: tuple[str, ...], safety_mode: str, phase: str) -> None:
         system_prompt = CODE_SYSTEM_PROMPT
         phase_label = "编码执行"
 
-    # ---- 5. 运行 ReAct 循环（带 rich 状态指示）----
+    # ---- 5. 运行 ReAct 循环 ----
     # 编码阶段：启用自动修复重试 + 自动注入 spec.md 项目级上下文
     mode_label = "[auto]" if safety_mode == "auto" else "[plan]"
-    with console.status(
-        f"[bold green]Agent 思考中... ({phase_label}, bash: {mode_label})"
-    ):
+    if stream:
+        # 流式模式：过程实时打印，不需要 status spinner；结果已逐字显示
+        console.print(
+            f"[bold green]Agent 思考中... ({phase_label}, bash: {mode_label})[/]"
+        )
         if phase == "code":
             spec = ensure_spec()
             task_with_context = (
@@ -227,12 +261,30 @@ def main(args: tuple[str, ...], safety_mode: str, phase: str) -> None:
                 system_prompt,
                 task_with_context,
                 bash_safety_mode=safety_mode,
+                stream=True,
             )
         else:
-            result = run(system_prompt, task, bash_safety_mode=safety_mode)
+            result = run(system_prompt, task, bash_safety_mode=safety_mode, stream=True)
+        console.print("\n[bold green]✅ 完成[/]")
+    else:
+        with console.status(
+            f"[bold green]Agent 思考中... ({phase_label}, bash: {mode_label})"
+        ):
+            if phase == "code":
+                spec = ensure_spec()
+                task_with_context = (
+                    f"{task}\n\n===== spec.md 项目级上下文 =====\n{spec}"
+                )
+                result = run_with_retry(
+                    system_prompt,
+                    task_with_context,
+                    bash_safety_mode=safety_mode,
+                )
+            else:
+                result = run(system_prompt, task, bash_safety_mode=safety_mode)
 
-    # ---- 6. 输出最终结果 ----
-    console.print(Panel(result, title="wz-agent 回复"))
+        # ---- 6. 输出最终结果 ----
+        console.print(Panel(result, title="wz-agent 回复"))
 
 
 if __name__ == "__main__":

@@ -67,6 +67,9 @@ python src/main.py to-tickets <feature-slug 或 spec 文件路径>
 python src/main.py "帮我写一个猜人游戏" --safety-mode plan
 ```
 
+> 💡 默认**流式输出**：agent 的思考与工具调用过程会实时打印，方便观察与随时 `Ctrl-C` 中断；
+> 加 `--no-stream` 可关闭（等待完整结果后一次性返回）。
+
 ## 安全边界
 
 > bash 工具内置的两道防护只是**防呆，不是安全边界**。
