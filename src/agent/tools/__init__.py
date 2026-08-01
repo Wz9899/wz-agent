@@ -7,6 +7,7 @@ from agent.tools.edit import EditTool
 from agent.tools.bash import BashTool
 from agent.tools.triage import ListIssuesTool, SetIssueStatusTool
 from agent.tools.tickets import AllocateIssueTool
+from agent.tools.interact import AskUserTool, CheckpointTool
 
 # 按名称索引的工具实例
 ALL_TOOLS: dict[str, BaseTool] = {}
@@ -47,3 +48,6 @@ _register(_bash)
 _register(ListIssuesTool())
 _register(SetIssueStatusTool())
 _register(AllocateIssueTool())
+
+_register(AskUserTool())
+_register(CheckpointTool())

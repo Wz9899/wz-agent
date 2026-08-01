@@ -69,6 +69,10 @@ python src/main.py "帮我写一个猜人游戏" --safety-mode plan
 
 > 💡 默认**流式输出**：agent 的思考与工具调用过程会实时打印，方便观察与随时 `Ctrl-C` 中断；
 > 加 `--no-stream` 可关闭（等待完整结果后一次性返回）。
+>
+> 💡 默认**人机交互**（clarify/code 阶段）：agent 可中途停下问你问题（`ask_user`）、
+> 每完成一个模块汇报等你确认（`checkpoint`）、随时 `Ctrl-C` 打断（继续 / 注入指令 / 停止）。
+> 加 `--no-interactive` 可关闭（一次跑完）。triage / to-tickets 始终全自动。
 
 ## 安全边界
 

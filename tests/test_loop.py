@@ -4,6 +4,8 @@
 加载导致的占位符问题），且之后复用同一实例。
 """
 
+from agent import interactive
+
 import agent.loop as loop
 
 
@@ -147,3 +149,102 @@ def test_accumulate_multiple_tool_calls_ordered():
 def test_accumulate_skips_empty_choices():
     content, calls = loop._accumulate_stream([_D(choices=[])])
     assert content == "" and calls == []
+
+
+# ---------- _maybe_compact：user 封轮 ----------
+
+
+def test_compact_keeps_trailing_user_round(monkeypatch):
+    """交互注入的 user 消息作为独立轮保留，不被误裁。"""
+    monkeypatch.setattr(loop, "MAX_CONTEXT_CHARS", 0)
+    monkeypatch.setattr(loop, "KEEP_HISTORY_ROUNDS", 2)
+    msgs = _rounds(3) + [{"role": "user", "content": "用户回答"}]
+    loop._maybe_compact(msgs)
+    assert msgs[-1] == {"role": "user", "content": "用户回答"}
+
+
+# ---------- _run_with_retry_on_messages ----------
+
+
+def test_retry_on_messages_abort_not_retried(monkeypatch):
+    calls = {"n": 0}
+
+    def fake(messages, **kwargs):
+        calls["n"] += 1
+        return "[ABORT] 用户中断执行。"
+
+    monkeypatch.setattr(loop, "_run_loop", fake)
+    result = loop._run_with_retry_on_messages([{"role": "user", "content": "x"}], max_retries=3)
+    assert result == "[ABORT] 用户中断执行。"
+    assert calls["n"] == 1
+
+
+def test_retry_on_messages_api_err_not_retried(monkeypatch):
+    calls = {"n": 0}
+
+    def fake(messages, **kwargs):
+        calls["n"] += 1
+        return "[API-ERR] 限流"
+
+    monkeypatch.setattr(loop, "_run_loop", fake)
+    loop._run_with_retry_on_messages([{"role": "user", "content": "x"}], max_retries=3)
+    assert calls["n"] == 1
+
+
+def test_retry_on_messages_retries_err_then_succeeds(monkeypatch):
+    calls = {"n": 0}
+
+    def fake(messages, **kwargs):
+        calls["n"] += 1
+        return "[ERR] 失败" if calls["n"] <= 2 else "成功了"
+
+    monkeypatch.setattr(loop, "_run_loop", fake)
+    result = loop._run_with_retry_on_messages([{"role": "user", "content": "x"}], max_retries=3)
+    assert result == "成功了"
+    assert calls["n"] == 3
+
+
+# ---------- run_interactive ----------
+
+
+def test_run_interactive_non_interactive_degrades(monkeypatch):
+    """ENABLED=False 时退化为单次 run / run_with_retry。"""
+    monkeypatch.setattr(interactive, "ENABLED", False)
+    captured = {}
+
+    def fake_run(sp, um, **kwargs):
+        captured["run"] = True
+        return "run-result"
+
+    monkeypatch.setattr(loop, "run", fake_run)
+    assert loop.run_interactive("sp", "um", retry=False) == "run-result"
+    assert captured.get("run")
+
+
+def test_run_interactive_dialogue_flow(monkeypatch):
+    """多轮对话：问题→回答→问题→回答→[DONE]，回答累积进历史。"""
+    monkeypatch.setattr(interactive, "ENABLED", True)
+    answers = iter(["Python", "网页"])
+    monkeypatch.setattr(interactive, "prompt_human", lambda prompt: next(answers))
+    results = iter(["用什么语言？", "命令行还是网页？", "[DONE] 已写入 spec.md"])
+    seen: list[list[str]] = []
+
+    def fake_run_loop(messages, **kwargs):
+        seen.append([m["content"] for m in messages if m["role"] == "user"])
+        return next(results)
+
+    monkeypatch.setattr(loop, "_run_loop", fake_run_loop)
+    out = loop.run_interactive("sp", "帮我写游戏", retry=False)
+    assert out == "[DONE] 已写入 spec.md"
+    # 第 1 轮只有初始任务；第 2 轮含第一个回答；第 3 轮含两个回答
+    assert seen[0] == ["帮我写游戏"]
+    assert seen[1] == ["帮我写游戏", "Python"]
+    assert seen[2] == ["帮我写游戏", "Python", "网页"]
+
+
+def test_run_interactive_exit_aborts(monkeypatch):
+    monkeypatch.setattr(interactive, "ENABLED", True)
+    monkeypatch.setattr(interactive, "prompt_human", lambda prompt: "exit")
+    monkeypatch.setattr(loop, "_run_loop", lambda messages, **kw: "一个问题")
+    out = loop.run_interactive("sp", "um", retry=False)
+    assert out == "[ABORT] 用户主动退出对话。"

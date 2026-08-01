@@ -10,6 +10,7 @@ import os
 from openai import OpenAI
 from openai import APIError, APIConnectionError, RateLimitError
 
+from agent import interactive
 from agent.tools import ALL_TOOLS, get_bash_tool
 
 # ============================================================
@@ -76,13 +77,14 @@ def _estimate_chars(messages: list[dict]) -> int:
 def _maybe_compact(messages: list[dict]) -> None:
     """消息总量超过预算时，就地压缩历史：保留 system + 首条 user + 最近 N 轮。
 
-    结构假设：[system, user, (assistant, tool*)*, ...]。
-    被丢弃的中间轮次是已完成的早期工具操作；任务定义在 system 与首条 user 中，
+    结构假设：[system, user, (assistant, tool*)*, user?, ...]。
+    被丢弃的中间轮次是已完成的早期操作；任务定义在 system 与首条 user 中，
     最近 KEEP_HISTORY_ROUNDS 轮保留当前工作状态，因此压缩不丢失任务本身。
     压缩后插入一条 system 提示，避免 LLM 因记录减少而困惑。
 
-    按"轮"为单位裁剪，保证保留的 assistant 与其 tool 结果始终成对，
-    不会产生 openai API 拒绝的孤立 tool 消息。
+    按"轮"为单位裁剪，assistant 与 user 都封轮——交互模式下用户回答/注入
+    指令是独立的 user 轮次，必须成对保留，否则最新回答会被误裁。assistant
+    与其 tool 结果始终成对，不产生 openai API 拒绝的孤立 tool 消息。
     """
     if _estimate_chars(messages) <= MAX_CONTEXT_CHARS:
         return
@@ -95,7 +97,7 @@ def _maybe_compact(messages: list[dict]) -> None:
     current: list[dict] = []
     for m in reversed(tail):
         current.insert(0, m)
-        if m.get("role") == "assistant":
+        if m.get("role") in ("assistant", "user"):
             rounds.insert(0, current)
             current = []
             if len(rounds) >= KEEP_HISTORY_ROUNDS:
@@ -190,7 +192,7 @@ def _call_stream(
         chunks.append(chunk)
         # 文本增量实时打印（同时保存 chunk 用于累积）
         if chunk.choices and chunk.choices[0].delta.content:
-            print(chunk.choices[0].delta.content, end="", flush=True)
+            interactive.print_human(chunk.choices[0].delta.content, end="")
 
     return _accumulate_stream(chunks)
 
@@ -243,9 +245,9 @@ def run_with_retry(
     （工具执行异常、达到步数上限）。此时把失败详情作为新的用户消息
     让 LLM 分析原因并修复，最多重试 max_retries 次（默认 3）。
 
-    不重试的条件：结果以 '[API-ERR]' 开头 —— 429 限流、网络断开、
-    API 服务端错误等属于基础设施故障，LLM 无法通过修改代码修复，
-    重试只会浪费轮次，直接原样返回。
+    不重试的条件：结果以 '[API-ERR]' 或 '[ABORT]' 开头 —— 前者是基础
+    设施故障（限流/断网/服务端），后者是用户主动中断，LLM 都修不了，
+    直接返回不浪费轮次。
 
     参数:
         system_prompt:    系统提示词。
@@ -256,15 +258,36 @@ def run_with_retry(
         stream:           是否流式输出 —— True 时实时打印过程，便于观察。
 
     返回:
-        成功的最终回复；不可修复的 API 错误或重试用尽时返回错误描述。
+        成功的最终回复；不可修复的错误或重试用尽时返回错误描述。
     """
-    messages: list[dict] = [{"role": "system", "content": system_prompt}]
+    messages: list[dict] = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_message},
+    ]
+    return _run_with_retry_on_messages(
+        messages,
+        bash_safety_mode=bash_safety_mode,
+        max_steps=max_steps,
+        max_retries=max_retries,
+        stream=stream,
+    )
 
+
+def _run_with_retry_on_messages(
+    messages: list[dict],
+    *,
+    bash_safety_mode: str = "auto",
+    max_steps: int = 10,
+    max_retries: int = 3,
+    stream: bool = False,
+) -> str:
+    """在给定的消息列表上跑带自动修复的循环（共享同一份历史）。
+
+    run_with_retry 与 run_interactive(retry=True) 共用的底层逻辑。
+    '[API-ERR]'（基础设施故障）与 '[ABORT]'（用户中止）开头不重试。
+    """
     for attempt in range(max_retries + 1):
-        # 第一轮用原始任务，后续轮次把失败详情回喂给 LLM
-        if attempt == 0:
-            messages.append({"role": "user", "content": user_message})
-        else:
+        if attempt > 0:
             messages.append({
                 "role": "user",
                 "content": (
@@ -281,12 +304,12 @@ def run_with_retry(
             stream=stream,
         )
 
-        # API 层错误（限流/断网/服务端）—— LLM 修不了，直接返回不重试
-        if result.startswith("[API-ERR]"):
+        # 基础设施故障 / 用户中止 —— 不重试
+        if result.startswith(("[API-ERR]", "[ABORT]")):
             return result
 
         # 成功（非 [ERR]/[WARN] 开头）—— 立即返回
-        if not result.startswith("[ERR]") and not result.startswith("[WARN]"):
+        if not result.startswith(("[ERR]", "[WARN]")):
             return result
 
     # 重试用尽
@@ -347,6 +370,15 @@ def _run_loop(
                     }
                     for tc in (msg.tool_calls or [])
                 ]
+        except KeyboardInterrupt:
+            # 用户在 LLM 生成中按 Ctrl-C：走统一中断菜单。
+            # 生成尚未写入 messages（_call_stream 只打印不修改），resume/inject 可安全重来
+            if not interactive.ENABLED:
+                raise
+            action = interactive.handle_interrupt(messages)
+            if action == "abort":
+                return "[ABORT] 用户中断执行。"
+            continue  # resume / inject：messages 未变，重新调 LLM
         except RateLimitError:
             return "[API-ERR] API 调用失败：请求频率超过限制（429），请稍后重试。"
         except APIConnectionError:
@@ -382,9 +414,8 @@ def _run_loop(
                 # 3b. 流式模式：先展示本次工具调用
                 #     注意用 ASCII 箭头 '->' —— Windows GBK 控制台无法编码 '→'/'↳'
                 if stream:
-                    print(
-                        f"  -> 工具 {tool_name}({json.dumps(tool_args, ensure_ascii=False)[:160]})",
-                        flush=True,
+                    interactive.print_human(
+                        f"  -> 工具 {tool_name}({json.dumps(tool_args, ensure_ascii=False)[:160]})"
                     )
 
                 # 3c. 查找并执行工具
@@ -395,6 +426,21 @@ def _run_loop(
                     # 3d. 执行工具（包裹 try-catch 防止工具异常导致 Agent 崩溃）
                     try:
                         tool_result = tool.run(**tool_args)
+                    except KeyboardInterrupt:
+                        # 用户在工具执行中按 Ctrl-C：先补合成 tool 结果保持消息成对
+                        # （resume 的前提，否则 openai API 会拒绝孤儿 assistant），
+                        # 再走统一中断菜单；resume/inject 时 break 出 for 重进 while
+                        if not interactive.ENABLED:
+                            raise
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": call["id"],
+                            "content": "[WARN] 工具执行被用户中断（Ctrl-C）。请调整参数重试、换方式或跳过。",
+                        })
+                        action = interactive.handle_interrupt(messages)
+                        if action == "abort":
+                            return "[ABORT] 用户中断执行。"
+                        break
                     except Exception as e:
                         tool_result = f"错误：工具 '{tool_name}' 执行异常 —— {e}"
 
@@ -409,7 +455,7 @@ def _run_loop(
                 # 3f. 流式模式：展示结果摘要（首行 + 截断），让用户看到 agent 观察到什么
                 if stream:
                     preview = tool_result.strip().split("\n")[0][:200]
-                    print(f"  -> 结果 {preview}", flush=True)
+                    interactive.print_human(f"  -> 结果 {preview}")
 
                 # 3g. 把工具执行结果加入对话历史
                 messages.append({
@@ -420,9 +466,105 @@ def _run_loop(
 
                 # 3h. 历史超预算时压缩早期轮次，防止长任务上下文无限膨胀
                 _maybe_compact(messages)
+
+                # 3i. 消费交互 flag：checkpoint 注入的新指令 / 用户终止请求
+                if interactive.abort_requested:
+                    interactive.abort_requested = False
+                    return "[ABORT] 用户要求停止执行。"
+                if interactive.pending_instruction is not None:
+                    instruction = interactive.pending_instruction
+                    interactive.pending_instruction = None
+                    messages.append({"role": "user", "content": instruction})
         else:
-            # 3i. 纯文本回复 —— 任务完成
+            # 3j. 纯文本回复 —— 任务完成（写回历史，供交互对话的下一轮引用）
+            messages.append({"role": "assistant", "content": content})
             return content
 
     # ---- 4. 达到步数上限 ----
     return f"[WARN] 已达到最大步数限制（{max_steps} 步），Agent 未完成任务。"
+
+
+# ============================================================
+# 人机交互循环
+# ============================================================
+
+
+def run_interactive(
+    system_prompt: str,
+    user_message: str,
+    *,
+    retry: bool = False,
+    max_steps: int = 10,
+    bash_safety_mode: str = "auto",
+    max_retries: int = 3,
+    stream: bool = False,
+    max_rounds: int = 20,
+) -> str:
+    """人机交互循环：agent 与用户逐轮对话，直到任务完成或用户退出。
+
+    用于 clarify（retry=False）与 code（retry=True）两阶段：
+      - 每轮跑一次 _run_loop（或带自动修复）；agent 可能中途用 ask_user /
+        checkpoint 工具停下问用户（工具内阻塞 input），也可能返回普通文本。
+      - agent 返回普通文本（非终止前缀）时，本循环用 prompt_human 等用户
+        回答，把回答追加为新的 user 消息继续——这就是 clarify 的"逐轮追问"。
+      - agent 回复以 [DONE]/[ERR]/[WARN]/[API-ERR]/[ABORT] 开头或为空 → 终止。
+      - 循环中 Ctrl-C：handle_interrupt 菜单（继续 / 注入指令 / 停止）。
+      - 非交互模式（interactive.ENABLED=False）退化为单次 run/run_with_retry。
+
+    max_rounds 为对话轮次硬上限，防死循环。
+    """
+    if not interactive.ENABLED:
+        if retry:
+            return run_with_retry(
+                system_prompt, user_message,
+                max_steps=max_steps, bash_safety_mode=bash_safety_mode,
+                max_retries=max_retries, stream=stream,
+            )
+        return run(
+            system_prompt, user_message,
+            max_steps=max_steps, bash_safety_mode=bash_safety_mode,
+            stream=stream,
+        )
+
+    messages: list[dict] = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_message},
+    ]
+
+    for _ in range(max_rounds):
+        if retry:
+            result = _run_with_retry_on_messages(
+                messages,
+                bash_safety_mode=bash_safety_mode,
+                max_steps=max_steps,
+                max_retries=max_retries,
+                stream=stream,
+            )
+        else:
+            result = _run_loop(
+                messages,
+                bash_safety_mode=bash_safety_mode,
+                max_steps=max_steps,
+                stream=stream,
+            )
+
+        # agent 本轮结束（[DONE]/错误/中断/空）→ 对话结束
+        if interactive.is_terminal(result):
+            return result
+
+        # agent 返回了普通文本（通常是问题）—— 等用户回答继续
+        try:
+            answer = interactive.prompt_human("\n你的回答 > ")
+        except KeyboardInterrupt:
+            if not interactive.ENABLED:
+                raise
+            action = interactive.handle_interrupt(messages)
+            if action == "abort":
+                return "[ABORT] 用户中断执行。"
+            continue  # resume / inject：已处理，重新进循环
+
+        if answer.lower() in ("exit", "quit", "q", "exit()"):
+            return "[ABORT] 用户主动退出对话。"
+        messages.append({"role": "user", "content": answer})
+
+    return f"[WARN] 对话轮数超限（{max_rounds} 轮），已停止。"

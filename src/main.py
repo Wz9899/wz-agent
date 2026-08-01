@@ -33,9 +33,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 os.chdir(PROJECT_ROOT)
 
-from agent import issues
+from agent import interactive, issues
 from agent.context import MISSING_SPEC_MESSAGE, ensure_spec, spec_exists
-from agent.loop import run, run_with_retry
+from agent.loop import run_interactive, run_with_retry
 from agent.prompts import (
     CLARIFY_SYSTEM_PROMPT,
     CODE_SYSTEM_PROMPT,
@@ -81,6 +81,9 @@ def _run_agent(
     简短提示（结果已逐字显示，不再重复输出 Panel）。
     stream=False 时：保留 status spinner + 结果 Panel 的旧行为。
     """
+    # triage / to-tickets 是自动化流程：强制非交互，避免 LLM 误调 ask_user 阻塞
+    interactive.ENABLED = False
+
     if not _check_api_key():
         raise SystemExit(1)
 
@@ -92,7 +95,7 @@ def _run_agent(
             bash_safety_mode=safety_mode,
             stream=True,
         )
-        console.print("\n[bold green]✅ 完成[/]")
+        console.print("\n[bold green]完成[/]")
     else:
         with console.status(f"[bold green]{title}"):
             result = run_with_retry(
@@ -177,16 +180,26 @@ def _run_to_tickets(target: str, safety_mode: str, stream: bool) -> None:
     default=False,
     help="关闭流式输出（等待完整结果后一次性返回）",
 )
+@click.option(
+    "--no-interactive",
+    is_flag=True,
+    default=False,
+    help="关闭人机交互（clarify/code 阶段 agent 不再中途停下询问，一次跑完）",
+)
 def main(
     args: tuple[str, ...],
     safety_mode: str,
     phase: str,
     no_stream: bool,
+    no_interactive: bool,
 ) -> None:
     """wz-agent — 通用编码助手：主动追问需求，自动生成代码。"""
 
     args = list(args)
     stream = not no_stream
+    # 交互开关：clarify/code 默认交互（可 --no-interactive 关闭）；
+    # triage/to-tickets 在 _run_agent 里强制关闭
+    interactive.ENABLED = not no_interactive
 
     # ---- 0. v2.0 子命令分发（triage / to-tickets）----
     if args and args[0] in SUBCOMMANDS:
@@ -246,45 +259,50 @@ def main(
 
     # ---- 5. 运行 ReAct 循环 ----
     # 编码阶段：启用自动修复重试 + 自动注入 spec.md 项目级上下文
-    mode_label = "[auto]" if safety_mode == "auto" else "[plan]"
-    if stream:
-        # 流式模式：过程实时打印，不需要 status spinner；结果已逐字显示
-        console.print(
-            f"[bold green]Agent 思考中... ({phase_label}, bash: {mode_label})[/]"
-        )
-        if phase == "code":
-            spec = ensure_spec()
-            task_with_context = (
-                f"{task}\n\n===== spec.md 项目级上下文 =====\n{spec}"
-            )
-            result = run_with_retry(
-                system_prompt,
-                task_with_context,
-                bash_safety_mode=safety_mode,
-                stream=True,
-            )
-        else:
-            result = run(system_prompt, task, bash_safety_mode=safety_mode, stream=True)
-        console.print("\n[bold green]✅ 完成[/]")
+    # clarify / code 都走 run_interactive（retry 区分）——交互模式下 agent
+    # 可中途用 ask_user / checkpoint 停下询问用户，可随时 Ctrl-C 打断
+    if phase == "code":
+        spec = ensure_spec()
+        task_arg = f"{task}\n\n===== spec.md 项目级上下文 =====\n{spec}"
+        retry = True
     else:
-        with console.status(
-            f"[bold green]Agent 思考中... ({phase_label}, bash: {mode_label})"
-        ):
-            if phase == "code":
-                spec = ensure_spec()
-                task_with_context = (
-                    f"{task}\n\n===== spec.md 项目级上下文 =====\n{spec}"
-                )
-                result = run_with_retry(
-                    system_prompt,
-                    task_with_context,
-                    bash_safety_mode=safety_mode,
-                )
-            else:
-                result = run(system_prompt, task, bash_safety_mode=safety_mode)
+        task_arg = task
+        retry = False
 
-        # ---- 6. 输出最终结果 ----
-        console.print(Panel(result, title="wz-agent 回复"))
+    mode_label = "[auto]" if safety_mode == "auto" else "[plan]"
+    try:
+        if stream or interactive.ENABLED:
+            # 流式或交互：不用 status spinner（交互时 input() 会与之冲突）
+            console.print(
+                f"[bold green]Agent 思考中... ({phase_label}, bash: {mode_label})[/]"
+            )
+            result = run_interactive(
+                system_prompt,
+                task_arg,
+                retry=retry,
+                bash_safety_mode=safety_mode,
+                stream=stream,
+            )
+            console.print("\n[bold green]完成[/]")
+        else:
+            # 非流式且非交互：status spinner + 结果 Panel
+            with console.status(
+                f"[bold green]Agent 思考中... ({phase_label}, bash: {mode_label})"
+            ):
+                result = run_interactive(
+                    system_prompt,
+                    task_arg,
+                    retry=retry,
+                    bash_safety_mode=safety_mode,
+                    stream=False,
+                )
+
+            # ---- 6. 输出最终结果 ----
+            console.print(Panel(result, title="wz-agent 回复"))
+    except KeyboardInterrupt:
+        # 非交互模式下的 Ctrl-C 透传到这里：干净退出
+        console.print("\n[yellow]已中断。[/]")
+        raise SystemExit(130)
 
 
 if __name__ == "__main__":
