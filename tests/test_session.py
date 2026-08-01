@@ -159,3 +159,50 @@ def test_handle_command_clear_cancel(monkeypatch):
     monkeypatch.setattr(session.console, "print", lambda *a, **k: printed.append(a))
     assert session._handle_command("/clear") == "continue"
     assert any("已取消" in str(x) for x in printed)
+
+
+# ---------- 需求确认环节 _confirm_requirements ----------
+
+
+def test_confirm_no_extra_then_prompt_code(monkeypatch):
+    """用户回车（无补充）→ 提示输入编码，不再次跑 agent。"""
+    monkeypatch.setattr(interactive, "prompt_human", lambda prompt: "")
+    printed = []
+    monkeypatch.setattr(session.console, "print", lambda *a, **k: printed.append(a))
+    called = {"n": 0}
+
+    def fake(sp, um, **kw):
+        called["n"] += 1
+        return "[DONE]"
+
+    monkeypatch.setattr(session, "run_interactive", fake)
+    session._confirm_requirements("auto", True)
+    assert called["n"] == 0
+    assert any("需求确认完毕" in str(x) for x in printed)
+
+
+def test_confirm_with_extra_integrates_then_prompt_code(monkeypatch):
+    """用户补充内容 → 让 agent 整合进 spec；再回车 → 结束。"""
+    answers = iter(["加一个计分系统", ""])
+    monkeypatch.setattr(interactive, "prompt_human", lambda prompt: next(answers))
+    called = {"n": 0}
+
+    def fake(sp, um, **kw):
+        called["n"] += 1
+        assert "加一个计分系统" in um  # 补充内容传给 agent
+        return "[DONE] 已整合"
+
+    monkeypatch.setattr(session, "run_interactive", fake)
+    session._confirm_requirements("auto", True)
+    assert called["n"] == 1
+
+
+def test_confirm_ctrl_c_exits(monkeypatch):
+    """确认环节 Ctrl-C → 正常提示，不抛异常。"""
+    def _ctrl_c(prompt):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(interactive, "prompt_human", _ctrl_c)
+    printed = []
+    monkeypatch.setattr(session.console, "print", lambda *a, **k: printed.append(a))
+    session._confirm_requirements("auto", True)
+    assert any("需求确认完毕" in str(x) for x in printed)

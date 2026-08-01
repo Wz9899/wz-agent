@@ -101,9 +101,43 @@ def run_clarify(requirement: str, safety_mode: str, stream: bool) -> None:
     if not interactive.is_terminal(result):
         console.print(result, markup=False)
     if spec_exists():
-        console.print(f"\n[bold green]spec.md 已写入: {spec_target}。输入 [cyan]编码[/] 开始实现。[/]")
+        console.print(f"\n[bold green]spec.md 已写入: {spec_target}[/]")
+        _confirm_requirements(safety_mode, stream)
     else:
         console.print(f"\n[yellow]未生成 spec.md：{result}[/]", markup=False)
+
+
+def _confirm_requirements(safety_mode: str, stream: bool) -> None:
+    """需求确认环节：澄清写完 spec 后，循环询问是否还有补充，直到确认完整。
+
+    用户回车 → 确认无补充，提示输入"编码"开始实现；
+    用户输入补充内容 → 让 agent 把补充整合进现有 spec.md，再继续询问。
+    """
+    while True:
+        try:
+            extra = interactive.prompt_human("\n还需要补充什么吗？[回车]=没有，直接输入补充内容 > ")
+        except (KeyboardInterrupt, EOFError):
+            console.print("\n[bold green]需求确认完毕。输入 [cyan]编码[/] 开始实现。[/]")
+            return
+        if not extra.strip():
+            console.print("[bold green]需求确认完毕。输入 [cyan]编码[/] 开始实现。[/]")
+            return
+        runtime.write_transcript(f"用户补充: {extra}\n")
+        console.print("[bold green]正在把补充整合进 spec.md...[/]")
+        task = (
+            f"用户对已写入的 spec.md 补充了以下需求，请把它整合进现有 spec.md：\n"
+            f"补充内容：{extra}\n\n"
+            f"spec.md 路径：{runtime.spec_path()}\n"
+            f"请先 read 现有 spec.md，用 edit 在对应章节更新/补充该需求，完成后回复 [DONE]。"
+        )
+        run_interactive(
+            CLARIFY_SYSTEM_PROMPT,
+            task,
+            retry=False,
+            max_steps=SESSION_MAX_STEPS,
+            bash_safety_mode=safety_mode,
+            stream=stream,
+        )
 
 
 def run_code(instruction: str, safety_mode: str, stream: bool) -> None:
