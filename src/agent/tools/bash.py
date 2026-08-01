@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from dataclasses import dataclass
 
@@ -233,18 +234,27 @@ class BashTool(BaseTool):
         因为 _execute 和 _execute_plan 各自在调用前做了安全检查，
         所以这里只负责执行和超时/错误处理。
         """
+        # Windows 上 shell=True 的 cmd 会衍生子进程，超时需能终止整棵进程树
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
         try:
-            result = subprocess.run(
+            proc = subprocess.Popen(
                 command,
                 shell=True,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
                 errors="replace",   # 非法字节替换为 �，避免读取线程解码崩溃导致流为 None
-                timeout=self.TIMEOUT,
+                creationflags=creationflags,
             )
+            stdout, stderr = proc.communicate(timeout=self.TIMEOUT)
         except subprocess.TimeoutExpired:
+            self._kill_process_tree(proc)
+            try:
+                proc.communicate(timeout=5)  # 收尾，清空残留管道，防僵尸
+            except Exception:
+                pass
             return (
-                f"[ERR] 超时（>{self.TIMEOUT}s）：已被强制终止。"
+                f"[ERR] 超时（>{self.TIMEOUT}s）：已连同子进程强制终止。"
                 f"\n提示：如果命令需要更长时间，请考虑拆分或优化。"
             )
         except FileNotFoundError:
@@ -256,16 +266,36 @@ class BashTool(BaseTool):
         # 拼接 stdout 和 stderr（None 防御：极端情况下子进程流可能为 None）
         output_parts: list[str] = []
 
-        stdout_text = (result.stdout or "").strip()
-        stderr_text = (result.stderr or "").strip()
+        stdout_text = (stdout or "").strip()
+        stderr_text = (stderr or "").strip()
 
         if stdout_text:
-            output_parts.append((result.stdout or "").rstrip())
+            output_parts.append((stdout or "").rstrip())
 
         if stderr_text:
-            output_parts.append(f"[stderr]\n{(result.stderr or '').rstrip()}")
+            output_parts.append(f"[stderr]\n{(stderr or '').rstrip()}")
 
         if not output_parts:
             return "（命令执行完毕，无输出）"
 
         return "\n".join(output_parts)
+
+    def _kill_process_tree(self, proc) -> None:
+        """超时后强制终止整棵进程树。
+
+        Windows 用 taskkill /T /F 按 PID 杀 cmd 及其全部子进程（如 python）；
+        POSIX 用 proc.kill()（shell 子进程一般同组）。
+        """
+        if os.name == "nt":
+            try:
+                subprocess.run(
+                    ["taskkill", "/pid", str(proc.pid), "/T", "/F"],
+                    capture_output=True,
+                )
+            except Exception:
+                pass
+        else:
+            try:
+                proc.kill()
+            except Exception:
+                pass

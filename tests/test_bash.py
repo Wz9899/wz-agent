@@ -107,12 +107,15 @@ def test_plan_description_mentions_special_commands(tool):
 def test_execute_handles_none_streams(monkeypatch):
     """子进程 stdout/stderr 为 None 时不崩溃（Windows 编码失败曾导致 NoneType.strip）。"""
     tool = BashTool()
-    monkeypatch.setattr(
-        "agent.tools.bash.subprocess.run",
-        lambda *a, **k: subprocess.CompletedProcess(
-            args="", returncode=0, stdout=None, stderr=None
-        ),
-    )
+
+    class _Fake:
+        pid = 999
+        def __init__(self, *a, **k):
+            pass
+        def communicate(self, timeout=None):
+            return None, None
+
+    monkeypatch.setattr("agent.tools.bash.subprocess.Popen", _Fake)
     out = tool._execute_one("some command")
     assert "无输出" in out
 
@@ -120,12 +123,34 @@ def test_execute_handles_none_streams(monkeypatch):
 def test_execute_handles_stderr_content(monkeypatch):
     """stderr 有内容时正常拼接进结果（含 [stderr] 标记）。"""
     tool = BashTool()
-    monkeypatch.setattr(
-        "agent.tools.bash.subprocess.run",
-        lambda *a, **k: subprocess.CompletedProcess(
-            args="", returncode=0, stdout="ok", stderr="some error"
-        ),
-    )
+
+    class _Fake:
+        pid = 999
+        def __init__(self, *a, **k):
+            pass
+        def communicate(self, timeout=None):
+            return "ok", "some error"
+
+    monkeypatch.setattr("agent.tools.bash.subprocess.Popen", _Fake)
     out = tool._execute_one("some command")
     assert "[stderr]" in out
     assert "some error" in out
+
+
+def test_execute_timeout_kills_process_tree(monkeypatch):
+    """超时返回 [ERR] 超时，并调用 _kill_process_tree 杀整棵进程树。"""
+    tool = BashTool()
+
+    class _Fake:
+        pid = 777
+        def __init__(self, *a, **k):
+            pass
+        def communicate(self, timeout=None):
+            raise subprocess.TimeoutExpired(cmd="x", timeout=timeout)
+
+    monkeypatch.setattr("agent.tools.bash.subprocess.Popen", _Fake)
+    killed = []
+    monkeypatch.setattr(tool, "_kill_process_tree", lambda proc: killed.append(proc.pid))
+    out = tool._execute_one("some long command")
+    assert "超时" in out
+    assert killed == [777]
