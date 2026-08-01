@@ -41,6 +41,12 @@ CODE_SYSTEM_PROMPT = """你是一个编码助手，根据 spec.md 中定义的�
 - **checkpoint** — 每完成一个模块调用 `checkpoint("模块X已完成...，下一步做模块Y")`
   把进度打印给用户看（不会暂停），然后继续做下一个模块。
 
+### 输出位置
+- 所有生成的代码写入 `output/` 目录（write 工具会自动创建该目录），
+  **不要写到项目根或其他位置**。
+- 每个实现任务生成一个单独的主文件：`output/<英文项目名>.py`
+  （如猜数字游戏 → `output/guess_number.py`）。确有辅助文件也统一放 `output/` 下。
+
 ### 4. 验证
 每完成一个模块后运行验证：
 - `python -m pytest` 或 `python 文件.py` 确认能跑
