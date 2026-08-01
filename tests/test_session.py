@@ -58,17 +58,20 @@ def test_handle_command_unknown(monkeypatch):
 
 
 def test_session_clarify_then_exit(monkeypatch):
-    """无 spec：输入需求 → clarify；再 /exit → 退出。"""
+    """无 spec、无已生成代码：输入需求 → clarify；再 /exit → 退出。"""
     answers = iter(["帮我写一个猜人游戏", "/exit"])
     monkeypatch.setattr(interactive, "prompt_human", lambda prompt: next(answers))
     monkeypatch.setattr(session, "spec_exists", lambda: False)
-    called = {"clarify": [], "code": []}
+    monkeypatch.setattr(session, "has_generated_code", lambda: False)
+    called = {"clarify": [], "code": [], "modify": []}
     monkeypatch.setattr(session, "run_clarify", lambda req, sm, st: called["clarify"].append(req))
     monkeypatch.setattr(session, "run_code", lambda ins, sm, st: called["code"].append(ins))
+    monkeypatch.setattr(session, "run_modify", lambda ins, sm, st: called["modify"].append(ins))
 
     session.run_interactive_session()
     assert called["clarify"] == ["帮我写一个猜人游戏"]
     assert called["code"] == []
+    assert called["modify"] == []
 
 
 def test_session_code_intent_dispatches_to_code(monkeypatch):
@@ -76,13 +79,16 @@ def test_session_code_intent_dispatches_to_code(monkeypatch):
     answers = iter(["编码", "/exit"])
     monkeypatch.setattr(interactive, "prompt_human", lambda prompt: next(answers))
     monkeypatch.setattr(session, "spec_exists", lambda: True)
-    called = {"clarify": [], "code": []}
+    monkeypatch.setattr(session, "has_generated_code", lambda: False)
+    called = {"clarify": [], "code": [], "modify": []}
     monkeypatch.setattr(session, "run_clarify", lambda req, sm, st: called["clarify"].append(req))
     monkeypatch.setattr(session, "run_code", lambda ins, sm, st: called["code"].append(ins))
+    monkeypatch.setattr(session, "run_modify", lambda ins, sm, st: called["modify"].append(ins))
 
     session.run_interactive_session()
     assert called["code"] == ["编码"]
     assert called["clarify"] == []
+    assert called["modify"] == []
 
 
 def test_session_exit_word(monkeypatch):
@@ -108,3 +114,42 @@ def test_session_eof_exits(monkeypatch):
         raise EOFError
     monkeypatch.setattr(interactive, "prompt_human", _eof)
     session.run_interactive_session()
+
+
+def test_session_modify_intent_dispatches_to_modify(monkeypatch):
+    """有已生成代码时，输入修改意见 → run_modify（而非新需求澄清）。"""
+    answers = iter(["把范围改成 1-1000", "/exit"])
+    monkeypatch.setattr(interactive, "prompt_human", lambda prompt: next(answers))
+    monkeypatch.setattr(session, "spec_exists", lambda: True)
+    monkeypatch.setattr(session, "has_generated_code", lambda: True)
+    called = {"clarify": [], "code": [], "modify": []}
+    monkeypatch.setattr(session, "run_clarify", lambda req, sm, st: called["clarify"].append(req))
+    monkeypatch.setattr(session, "run_code", lambda ins, sm, st: called["code"].append(ins))
+    monkeypatch.setattr(session, "run_modify", lambda ins, sm, st: called["modify"].append(ins))
+
+    session.run_interactive_session()
+    assert called["modify"] == ["把范围改成 1-1000"]
+    assert called["clarify"] == []
+
+
+def test_has_generated_code_true(monkeypatch, tmp_path):
+    """output/ 下有 .py 文件 → True。"""
+    out = tmp_path / "output"
+    out.mkdir()
+    (out / "game.py").write_text("print('hi')", encoding="utf-8")
+    monkeypatch.setattr(session, "PROJECT_ROOT", tmp_path)
+    assert session.has_generated_code() is True
+
+
+def test_has_generated_code_false(monkeypatch, tmp_path):
+    monkeypatch.setattr(session, "PROJECT_ROOT", tmp_path)
+    assert session.has_generated_code() is False
+
+
+def test_handle_command_clear_cancel(monkeypatch):
+    """/clear 且用户不确认（N）→ 取消，不执行清理。"""
+    monkeypatch.setattr(interactive, "prompt_human", lambda prompt: "n")
+    printed = []
+    monkeypatch.setattr(session.console, "print", lambda *a, **k: printed.append(a))
+    assert session._handle_command("/clear") == "continue"
+    assert any("已取消" in str(x) for x in printed)

@@ -9,12 +9,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from rich.console import Console
 from rich.panel import Panel
 
 from agent import interactive
 from agent.context import ensure_spec, spec_exists
 from agent.loop import run_interactive
+from agent.paths import PROJECT_ROOT
 from agent.prompts import CLARIFY_SYSTEM_PROMPT, CODE_SYSTEM_PROMPT
 
 console = Console()
@@ -47,11 +50,13 @@ def _print_help() -> None:
     console.print("[cyan]可用命令:[/]")
     console.print("  [bold]/help[/]    显示本帮助")
     console.print("  [bold]/spec[/]    查看当前 spec.md 内容")
+    console.print("  [bold]/clear[/]   清空 output/ 和 spec.md（重新开始）")
     console.print("  [bold]/exit[/]    退出会话（或输入 exit / q / Ctrl-C）")
     console.print("")
     console.print("直接输入:")
     console.print("  [bold]<需求描述>[/]  需求澄清：agent 逐轮问清后写 spec.md")
     console.print("  [bold]编码[/]        进入编码执行（需先有 spec.md，按模块自主实现）")
+    console.print("  [bold]<修改意见>[/]  已有代码后直接说修改意见（如\"把范围改成 1-1000\"），agent 会改代码")
 
 
 def _handle_command(line: str) -> str:
@@ -61,6 +66,8 @@ def _handle_command(line: str) -> str:
         return "exit"
     if cmd == "/help":
         _print_help()
+    elif cmd == "/clear":
+        _clear_outputs()
     elif cmd == "/spec":
         if spec_exists():
             console.print(Panel(ensure_spec(), title="spec.md"))
@@ -106,7 +113,75 @@ def run_code(instruction: str, safety_mode: str, stream: bool) -> None:
         bash_safety_mode=safety_mode,
         stream=stream,
     )
-    console.print("\n[bold green]本轮编码结束。输入新需求/指令继续，/exit 退出。[/]")
+    console.print("\n[bold green]本轮编码结束。输入修改意见/新需求继续，/exit 退出。[/]")
+
+
+# ============================================================
+# 修改反馈（已有代码后）
+# ============================================================
+
+
+def _generated_code_files() -> list[Path]:
+    """output/ 目录下已生成的 .py 文件（按修改时间倒序）。"""
+    out = PROJECT_ROOT / "output"
+    if not out.is_dir():
+        return []
+    return sorted(out.glob("*.py"), key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def has_generated_code() -> bool:
+    """是否已有 agent 生成的代码（output/ 下存在 .py）。"""
+    return bool(_generated_code_files())
+
+
+def run_modify(instruction: str, safety_mode: str, stream: bool) -> None:
+    """根据用户反馈修改现有代码：读 output/ 下代码，用 edit 修改，验证。"""
+    files = _generated_code_files()
+    if not files:
+        console.print("[yellow]还没有已生成的代码 —— 先输入需求澄清 + 编码。[/]")
+        return
+    file_list = "\n".join(f"  - {f.name}" for f in files)
+    spec_ctx = f"\n\n===== spec.md 项目级上下文 =====\n{ensure_spec()}" if spec_exists() else ""
+    task = (
+        f"用户输入：{instruction}\n\n"
+        f"output/ 目录下已有的代码文件：\n{file_list}\n"
+        f"请判断用户意图并处理：\n"
+        f"  - 如果是【修改代码】的请求 → 先 read 读取相关文件，理解现状后用 edit 精准修改，"
+        f"修改后运行验证，最后报告改了什么、如何验证。\n"
+        f"  - 如果是【对现有代码的提问/解释请求】→ 直接 read 相关文件并回答，回复以 [DONE] 开头。\n"
+        f"  - 不要创建新文件覆盖现有实现，除非确实需要。\n"
+        f"{spec_ctx}"
+    )
+    console.print("[bold green]修改代码...[/]")
+    result = run_interactive(
+        CODE_SYSTEM_PROMPT,
+        task,
+        retry=True,
+        max_steps=SESSION_MAX_STEPS,
+        bash_safety_mode=safety_mode,
+        stream=stream,
+    )
+    console.print("\n[bold green]修改完成。继续反馈/指令，/exit 退出。[/]")
+
+
+def _clear_outputs() -> None:
+    """清空 output/ 与 spec.md，重新开始（需确认）。"""
+    try:
+        confirm = interactive.prompt_human("确认清空 output/ 和 spec.md，重新开始？[y/N] > ")
+    except (EOFError, KeyboardInterrupt):
+        console.print("\n[yellow]已取消。[/]")
+        return
+    if confirm.lower() != "y":
+        console.print("[yellow]已取消。[/]")
+        return
+    import shutil
+    out = PROJECT_ROOT / "output"
+    if out.is_dir():
+        shutil.rmtree(out)
+    spec = PROJECT_ROOT / "spec.md"
+    if spec.is_file():
+        spec.unlink()
+    console.print("[yellow]已清空 output/ 和 spec.md，可以开始新需求。[/]")
 
 
 def run_interactive_session(safety_mode: str = "auto", stream: bool = True) -> None:
@@ -139,5 +214,7 @@ def run_interactive_session(safety_mode: str = "auto", stream: bool = True) -> N
 
         if is_code_intent(line) and spec_exists():
             run_code(line, safety_mode, stream)
+        elif has_generated_code():
+            run_modify(line, safety_mode, stream)
         else:
             run_clarify(line, safety_mode, stream)
