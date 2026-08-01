@@ -36,7 +36,7 @@ os.chdir(PROJECT_ROOT)
 from agent import interactive, issues
 from agent.context import MISSING_SPEC_MESSAGE, ensure_spec, spec_exists
 from agent.loop import run_interactive, run_with_retry
-from agent.session import run_interactive_session
+from agent.session import SESSION_MAX_STEPS, run_interactive_session
 from agent.prompts import (
     CLARIFY_SYSTEM_PROMPT,
     CODE_SYSTEM_PROMPT,
@@ -277,6 +277,7 @@ def main(
                 system_prompt,
                 task_arg,
                 retry=retry,
+                max_steps=SESSION_MAX_STEPS,
                 bash_safety_mode=safety_mode,
                 stream=stream,
             )
@@ -290,6 +291,7 @@ def main(
                     system_prompt,
                     task_arg,
                     retry=retry,
+                    max_steps=SESSION_MAX_STEPS,
                     bash_safety_mode=safety_mode,
                     stream=False,
                 )

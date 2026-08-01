@@ -27,6 +27,11 @@ CODE_TRIGGERS: frozenset[str] = frozenset({
 # 退出词
 EXIT_WORDS: frozenset[str] = frozenset({"exit", "quit", "q", "退出"})
 
+# 会话内单轮最大工具调用步数。
+# 澄清阶段"多问问清楚"：每个 ask_user 消耗一步，问 5-8 个问题 + 写 spec 需要余量；
+# 编码阶段分模块实现同样需要较多步数。
+SESSION_MAX_STEPS: int = 30
+
 
 def is_code_intent(line: str) -> bool:
     """用户输入是否为"开始编码"意图。
@@ -73,6 +78,7 @@ def run_clarify(requirement: str, safety_mode: str, stream: bool) -> None:
         CLARIFY_SYSTEM_PROMPT,
         requirement,
         retry=False,
+        max_steps=SESSION_MAX_STEPS,
         bash_safety_mode=safety_mode,
         stream=stream,
     )
@@ -96,6 +102,7 @@ def run_code(instruction: str, safety_mode: str, stream: bool) -> None:
         CODE_SYSTEM_PROMPT,
         task,
         retry=True,
+        max_steps=SESSION_MAX_STEPS,
         bash_safety_mode=safety_mode,
         stream=stream,
     )
