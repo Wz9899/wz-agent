@@ -248,3 +248,23 @@ def test_run_interactive_exit_aborts(monkeypatch):
     monkeypatch.setattr(loop, "_run_loop", lambda messages, **kw: "一个问题")
     out = loop.run_interactive("sp", "um", retry=False)
     assert out == "[ABORT] 用户主动退出对话。"
+
+
+def test_run_interactive_code_autonomous(monkeypatch):
+    """code（retry=True）自主执行：跑完一轮即返回，不进入对话循环等回答。"""
+    monkeypatch.setattr(interactive, "ENABLED", True)
+    calls = {"n": 0}
+
+    def fake_retry(messages, **kwargs):
+        calls["n"] += 1
+        return "[DONE] 全部模块完成"
+
+    monkeypatch.setattr(loop, "_run_with_retry_on_messages", fake_retry)
+
+    def _should_not_prompt(prompt):
+        raise AssertionError("code 自主执行不应等用户回答")
+    monkeypatch.setattr(interactive, "prompt_human", _should_not_prompt)
+
+    out = loop.run_interactive("sp", "um", retry=True)
+    assert out == "[DONE] 全部模块完成"
+    assert calls["n"] == 1  # 只跑一轮

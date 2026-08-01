@@ -46,7 +46,7 @@ class AskUserTool(BaseTool):
 
 
 class CheckpointTool(BaseTool):
-    """阶段汇报并暂停：每完成一个模块调用，等用户确认后再继续。"""
+    """阶段汇报：每完成一个模块调用，把进度打印到终端供用户观察，不停下。"""
 
     @property
     def name(self) -> str:
@@ -55,13 +55,12 @@ class CheckpointTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "阶段汇报并暂停执行：完成一个模块/阶段后调用它，汇报当前进度，"
-            "等待用户确认（回车继续 / 输入新指令 / 输 stop 终止）后才继续下一步。"
-            "适合分模块实现时每完成一个模块同步一次进度。"
+            "完成一个模块/阶段后调用它，把当前进度打印到终端供用户观察，"
+            "然后继续执行——不会暂停等待。适合分模块实现时每完成一个模块汇报一次。"
         )
 
     def run(self, summary: str) -> str:
-        """汇报进度并等待确认。
+        """汇报当前进度（非阻塞，不等待用户）。
 
         参数:
             summary: 当前进度摘要（做了什么、下一步计划）。
@@ -69,11 +68,4 @@ class CheckpointTool(BaseTool):
         if not interactive.ENABLED:
             return "(非交互模式) checkpoint 跳过，继续执行。"
         interactive.print_human(f"\n── 进度汇报 ──\n{summary}\n────────────")
-        ans = interactive.prompt_human("  [回车]=继续  [输入]=新指令  [stop]=终止 > ")
-        if ans.lower() == "stop":
-            interactive.abort_requested = True
-            return "[ABORT] 用户要求停止执行。请停止所有操作并总结当前进度。"
-        if ans:
-            interactive.pending_instruction = ans
-            return "[CHECKPOINT] 用户已确认，新的指令将作为独立消息注入对话。"
-        return "[CHECKPOINT] 用户已确认，继续执行。"
+        return "[CHECKPOINT] 进度已汇报，继续执行。"

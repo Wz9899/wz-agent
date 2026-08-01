@@ -1,9 +1,8 @@
 """人机交互基础设施 —— 交互开关、编码安全的人机 I/O、Ctrl-C 中断菜单、完成判定。
 
-交互状态（ENABLED / abort_requested / pending_instruction）是模块级全局，
-与 loop.py 的 _client、tools 的 bash mode 采用的模式一致。交互工具
-（ask_user / checkpoint）只读写这里的 flag；真正的消息注入与中断处理
-由 loop.py 消费这些 flag 完成——工具不持有 messages，避免循环依赖。
+交互状态（ENABLED）是模块级全局，与 loop.py 的 _client、tools 的 bash mode
+采用的模式一致。ask_user / checkpoint 只读 ENABLED 决定是否退化；消息注入
+与中断处理由 loop.py 直接完成——工具不持有 messages，避免循环依赖。
 """
 
 from __future__ import annotations
@@ -15,14 +14,9 @@ from typing import Literal
 # 交互状态
 # ============================================================
 
-# 交互开关：True 时 agent 可中途停下问用户；False 时 ask_user/checkpoint 退化
+# 交互开关：True 时 ask_user 可阻塞等回答、Ctrl-C 走中断菜单；
+# False 时交互工具退化，Ctrl-C 直接抛出让调用方干净退出
 ENABLED: bool = True
-
-# checkpoint 用户输入 stop 时置位，_run_loop 消费后终止当前执行
-abort_requested: bool = False
-
-# checkpoint 用户注入的新指令，_run_loop 消费后追加为真实 user 消息
-pending_instruction: str | None = None
 
 # 对话循环的终止前缀：命中这些开头的回复 → 本轮结束
 TERMINAL_PREFIXES: tuple[str, ...] = ("[DONE]", "[ERR]", "[WARN]", "[API-ERR]", "[ABORT]")

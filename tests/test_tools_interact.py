@@ -1,14 +1,7 @@
 """ask_user / checkpoint 交互工具单元测试（含非交互退化）。"""
 
-import pytest
-
 from agent import interactive
 from agent.tools.interact import AskUserTool, CheckpointTool
-
-
-def _reset_flags(monkeypatch):
-    monkeypatch.setattr(interactive, "abort_requested", False)
-    monkeypatch.setattr(interactive, "pending_instruction", None)
 
 
 # ---------- AskUserTool ----------
@@ -40,45 +33,22 @@ def test_ask_user_empty_answer(monkeypatch):
     assert out == "(用户未提供回答)"
 
 
-# ---------- CheckpointTool ----------
+# ---------- CheckpointTool（非阻塞汇报）----------
 
 
 def test_checkpoint_non_interactive_skips(monkeypatch):
     monkeypatch.setattr(interactive, "ENABLED", False)
-    _reset_flags(monkeypatch)
-
     out = CheckpointTool().run("模块1完成")
     assert out == "(非交互模式) checkpoint 跳过，继续执行。"
-    assert interactive.abort_requested is False
-    assert interactive.pending_instruction is None
 
 
-def test_checkpoint_enter_continues(monkeypatch):
+def test_checkpoint_non_blocking_reports(monkeypatch):
+    """checkpoint 非阻塞：汇报进度，不等待用户输入。"""
     monkeypatch.setattr(interactive, "ENABLED", True)
-    _reset_flags(monkeypatch)
-    monkeypatch.setattr(interactive, "prompt_human", lambda prompt: "")
+
+    def _should_not_call(prompt):
+        raise AssertionError("checkpoint 不应等待输入")
+    monkeypatch.setattr(interactive, "prompt_human", _should_not_call)
 
     out = CheckpointTool().run("模块1完成")
-    assert "继续执行" in out
-    assert interactive.abort_requested is False
-    assert interactive.pending_instruction is None
-
-
-def test_checkpoint_stop_aborts(monkeypatch):
-    monkeypatch.setattr(interactive, "ENABLED", True)
-    _reset_flags(monkeypatch)
-    monkeypatch.setattr(interactive, "prompt_human", lambda prompt: "stop")
-
-    out = CheckpointTool().run("模块1完成")
-    assert out.startswith("[ABORT]")
-    assert interactive.abort_requested is True
-
-
-def test_checkpoint_injects_instruction(monkeypatch):
-    monkeypatch.setattr(interactive, "ENABLED", True)
-    _reset_flags(monkeypatch)
-    monkeypatch.setattr(interactive, "prompt_human", lambda prompt: "改用 golang")
-
-    out = CheckpointTool().run("模块1完成")
-    assert "新的指令" in out
-    assert interactive.pending_instruction == "改用 golang"
+    assert "进度已汇报" in out

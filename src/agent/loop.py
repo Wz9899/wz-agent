@@ -466,17 +466,8 @@ def _run_loop(
 
                 # 3h. 历史超预算时压缩早期轮次，防止长任务上下文无限膨胀
                 _maybe_compact(messages)
-
-                # 3i. 消费交互 flag：checkpoint 注入的新指令 / 用户终止请求
-                if interactive.abort_requested:
-                    interactive.abort_requested = False
-                    return "[ABORT] 用户要求停止执行。"
-                if interactive.pending_instruction is not None:
-                    instruction = interactive.pending_instruction
-                    interactive.pending_instruction = None
-                    messages.append({"role": "user", "content": instruction})
         else:
-            # 3j. 纯文本回复 —— 任务完成（写回历史，供交互对话的下一轮引用）
+            # 3i. 纯文本回复 —— 任务完成（写回历史，供交互对话的下一轮引用）
             messages.append({"role": "assistant", "content": content})
             return content
 
@@ -500,18 +491,19 @@ def run_interactive(
     stream: bool = False,
     max_rounds: int = 20,
 ) -> str:
-    """人机交互循环：agent 与用户逐轮对话，直到任务完成或用户退出。
+    """监督式自主执行：agent 按计划自主跑，用户通过 Ctrl-C 随时干预。
 
-    用于 clarify（retry=False）与 code（retry=True）两阶段：
-      - 每轮跑一次 _run_loop（或带自动修复）；agent 可能中途用 ask_user /
-        checkpoint 工具停下问用户（工具内阻塞 input），也可能返回普通文本。
-      - agent 返回普通文本（非终止前缀）时，本循环用 prompt_human 等用户
-        回答，把回答追加为新的 user 消息继续——这就是 clarify 的"逐轮追问"。
-      - agent 回复以 [DONE]/[ERR]/[WARN]/[API-ERR]/[ABORT] 开头或为空 → 终止。
-      - 循环中 Ctrl-C：handle_interrupt 菜单（继续 / 注入指令 / 停止）。
-      - 非交互模式（interactive.ENABLED=False）退化为单次 run/run_with_retry。
+    两种模式：
+      - retry=True（code 编码执行）：自主执行，跑完一轮（带自动修复）即返回，
+        中间不停下来问用户。用户随时 Ctrl-C 打断（继续 / 注入指令 / 停止）。
+      - retry=False（clarify 需求澄清）：对话循环——agent 用 ask_user 工具
+        追问，或在返回普通文本问题时等待用户回答，直到 [DONE] 结束。
 
-    max_rounds 为对话轮次硬上限，防死循环。
+    - agent 回复以 [DONE]/[ERR]/[WARN]/[API-ERR]/[ABORT] 开头或为空 → 终止。
+    - 对话循环中 Ctrl-C：handle_interrupt 菜单（继续 / 注入指令 / 停止）。
+    - 非交互模式（interactive.ENABLED=False）退化为单次 run/run_with_retry。
+
+    max_rounds 为 clarify 对话轮次硬上限，防死循环。
     """
     if not interactive.ENABLED:
         if retry:
@@ -531,22 +523,25 @@ def run_interactive(
         {"role": "user", "content": user_message},
     ]
 
+    if retry:
+        # code：自主执行，跑完一轮（带自动修复）即返回；
+        # 中途 Ctrl-C 由 _run_loop 的 handle_interrupt 菜单处理
+        return _run_with_retry_on_messages(
+            messages,
+            bash_safety_mode=bash_safety_mode,
+            max_steps=max_steps,
+            max_retries=max_retries,
+            stream=stream,
+        )
+
+    # clarify：对话循环——agent 返回普通文本问题后，等用户回答继续
     for _ in range(max_rounds):
-        if retry:
-            result = _run_with_retry_on_messages(
-                messages,
-                bash_safety_mode=bash_safety_mode,
-                max_steps=max_steps,
-                max_retries=max_retries,
-                stream=stream,
-            )
-        else:
-            result = _run_loop(
-                messages,
-                bash_safety_mode=bash_safety_mode,
-                max_steps=max_steps,
-                stream=stream,
-            )
+        result = _run_loop(
+            messages,
+            bash_safety_mode=bash_safety_mode,
+            max_steps=max_steps,
+            stream=stream,
+        )
 
         # agent 本轮结束（[DONE]/错误/中断/空）→ 对话结束
         if interactive.is_terminal(result):
