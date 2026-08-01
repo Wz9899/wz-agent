@@ -41,7 +41,10 @@ class AskUserTool(BaseTool):
                 "并在最终回复中明确标注该假设。"
             )
         interactive.print_human(f"\n[询问] {question}")
-        answer = interactive.prompt_human("  你的回答 > ")
+        try:
+            answer = interactive.prompt_human("  你的回答 > ")
+        except EOFError:
+            return "(用户未提供回答)"
         return answer if answer else "(用户未提供回答)"
 
 

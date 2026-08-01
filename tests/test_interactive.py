@@ -28,11 +28,13 @@ def test_is_terminal_plain_question_is_not_terminal():
 # ---------- prompt_human ----------
 
 
-def test_prompt_human_eof_returns_empty(monkeypatch):
+def test_prompt_human_eof_raises(monkeypatch):
+    """输入流结束（EOF）抛 EOFError，由调用方决定如何处理。"""
     def _raise_eof(prompt=""):
         raise EOFError
     monkeypatch.setattr("builtins.input", _raise_eof)
-    assert interactive.prompt_human("> ") == ""
+    with pytest.raises(EOFError):
+        interactive.prompt_human("> ")
 
 
 def test_prompt_human_returns_stripped(monkeypatch):
@@ -46,6 +48,22 @@ def test_prompt_human_ctrl_c_propagates(monkeypatch):
     monkeypatch.setattr("builtins.input", _raise_kbi)
     with pytest.raises(KeyboardInterrupt):
         interactive.prompt_human("> ")
+
+
+# ---------- strip_surrogates ----------
+
+
+def test_strip_surrogates_keeps_normal_text():
+    assert interactive.strip_surrogates("正常中文 abc") == "正常中文 abc"
+
+
+def test_strip_surrogates_removes_surrogates():
+    # \udcae 是 Windows 管道输入可能引入的孤立 surrogate
+    assert interactive.strip_surrogates("a\udcae b") == "a b"
+
+
+def test_strip_surrogates_empty():
+    assert interactive.strip_surrogates("") == ""
 
 
 # ---------- handle_interrupt ----------

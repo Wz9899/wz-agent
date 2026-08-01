@@ -42,17 +42,24 @@ def print_human(text: str, *, end: str = "\n") -> None:
         print(safe, end=end, flush=True)
 
 
+def strip_surrogates(text: str) -> str:
+    """去掉字符串中的孤立 surrogate 字符（U+D800-U+DFFF）。
+
+    Windows 管道/重定向输入可能因编码转换引入孤立 surrogate，导致 OpenAI
+    json 序列化报 "'utf-8' codec can't encode character ... surrogates not allowed"。
+    """
+    return "".join(ch for ch in text if not 0xD800 <= ord(ch) <= 0xDFFF)
+
+
 def prompt_human(prompt: str) -> str:
-    """编码安全阻塞输入，返回用户输入（去掉首尾空白）。
+    """编码安全阻塞输入，返回用户输入（去掉首尾空白、清理 surrogate）。
 
     - Ctrl-C：抛 KeyboardInterrupt（由上层统一处理中断菜单）
-    - 非 TTY / 管道 EOF：返回空字符串（交互退化，不阻塞）
+    - 输入流结束 / 非 TTY EOF：抛 EOFError（由调用方决定：
+      ask_user 退化、对话循环终止、交互会话退出）
     """
     print_human(prompt, end="")
-    try:
-        return input().strip()
-    except EOFError:
-        return ""
+    return strip_surrogates(input().strip())
 
 
 # ============================================================
@@ -74,7 +81,7 @@ def handle_interrupt(messages: list[dict]) -> Literal["resume", "abort", "inject
     while True:
         try:
             choice = prompt_human("  [回车]=继续  [输入]=注入指令  [stop]=停止 > ")
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, EOFError):
             return "abort"
         if not choice:
             return "resume"

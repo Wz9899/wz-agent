@@ -346,6 +346,13 @@ def _run_loop(
     step = 0
 
     while step < max_steps:
+        # 清理消息中的孤立 surrogate（Windows 管道输入可能引入），
+        # 避免 OpenAI json 序列化失败；无 surrogate 时是零成本 no-op
+        for m in messages:
+            content = m.get("content")
+            if isinstance(content, str) and content:
+                m["content"] = interactive.strip_surrogates(content)
+
         # ---- 2. 调用 LLM（带工具 schema）----
         try:
             if stream:
@@ -550,6 +557,8 @@ def run_interactive(
         # agent 返回了普通文本（通常是问题）—— 等用户回答继续
         try:
             answer = interactive.prompt_human("\n你的回答 > ")
+        except EOFError:
+            return "[ABORT] 输入结束（EOF），对话终止。"
         except KeyboardInterrupt:
             if not interactive.ENABLED:
                 raise

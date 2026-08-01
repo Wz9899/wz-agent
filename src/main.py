@@ -36,6 +36,7 @@ os.chdir(PROJECT_ROOT)
 from agent import interactive, issues
 from agent.context import MISSING_SPEC_MESSAGE, ensure_spec, spec_exists
 from agent.loop import run_interactive, run_with_retry
+from agent.session import run_interactive_session
 from agent.prompts import (
     CLARIFY_SYSTEM_PROMPT,
     CODE_SYSTEM_PROMPT,
@@ -220,22 +221,13 @@ def main(
             _run_to_tickets(target, safety_mode, stream)
         return
 
-    # ---- 1. 任务描述：优先命令行参数；没有则进入实时输入模式 ----
+    # ---- 1. 任务描述：无参数则进入交互会话（持续对话，不退出）----
     task = " ".join(args).strip() if args else None
     if not task:
-        console.print("[cyan]（未提供任务参数 —— 请直接输入你的需求）[/]")
-        task = interactive.prompt_human("\n需求 > ")
-        if not task:
-            console.print(
-                Panel.fit(
-                    "[bold red]用法:[/] python src/main.py [cyan]\"任务描述\"[/]"
-                    " [--phase code] [--safety-mode plan]\n"
-                    "v2.0: python src/main.py [cyan]triage|to-tickets[/]"
-                    " [cyan]<feature-slug 或文件路径>[/]",
-                    title="wz-agent v2.0",
-                )
-            )
+        if not _check_api_key():
             raise SystemExit(1)
+        run_interactive_session(safety_mode=safety_mode, stream=stream)
+        return
 
     # ---- 2. 校验编码阶段的前置条件（spec.md 必须存在）----
     # 不依赖 API Key，优先检查 —— spec 缺失是比缺 key 更根本的问题
@@ -273,11 +265,13 @@ def main(
         retry = False
 
     mode_label = "[auto]" if safety_mode == "auto" else "[plan]"
+    # rich markup 转义：方括号需翻倍，否则 [auto]/[plan] 被当样式吞掉
+    mode_label_markup = mode_label.replace("[", "[[").replace("]", "]]")
     try:
         if stream or interactive.ENABLED:
             # 流式或交互：不用 status spinner（交互时 input() 会与之冲突）
             console.print(
-                f"[bold green]Agent 思考中... ({phase_label}, bash: {mode_label})[/]"
+                f"[bold green]Agent 思考中... ({phase_label}, bash: {mode_label_markup})[/]"
             )
             result = run_interactive(
                 system_prompt,
@@ -290,7 +284,7 @@ def main(
         else:
             # 非流式且非交互：status spinner + 结果 Panel
             with console.status(
-                f"[bold green]Agent 思考中... ({phase_label}, bash: {mode_label})"
+                f"[bold green]Agent 思考中... ({phase_label}, bash: {mode_label_markup})"
             ):
                 result = run_interactive(
                     system_prompt,
