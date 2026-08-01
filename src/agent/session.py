@@ -67,22 +67,49 @@ def _is_done_requirements(text: str) -> bool:
     return any(p in text for p in _DONE_PHRASES)
 
 
-# 疑问句特征（识别用户提问，直接回答而非当需求）
+# 疑问句特征（收紧：只有明确提问才识别，避免误把非提问当"回答"）
 _QUESTION_WORDS: tuple[str, ...] = (
-    "是啥", "是什么", "为什么", "为啥", "怎么", "如何", "在哪", "哪个", "哪些",
-    "是不是", "能否", "可以吗", "吗", "呢",
+    "是啥", "是什么", "为啥", "为什么", "怎么", "如何", "在哪", "哪个", "哪些",
+    "是否", "是不是",
 )
 
 
 def _is_question(text: str) -> bool:
-    """识别用户输入是否为提问（直接回答，而非需求/指令）。
+    """识别用户输入是否为明确提问（直接回答，而非需求/指令）。
 
-    以问号结尾，或含疑问特征词 → 视为提问。即使偶尔误判，run_qa 的
-    agent 也会兜底判断（是需求则退回澄清），不会丢失需求。
+    以问号结尾、或短问句以"吗"结尾、或含强疑问词 → 视为提问。
+    刻意收紧，避免"我不是每次输入都是要你回答"。
     """
-    if text.rstrip().endswith(("？", "?")):
+    t = text.strip()
+    if t.endswith(("？", "?")):
         return True
-    return any(w in text for w in _QUESTION_WORDS)
+    if len(t) <= 12 and t.endswith("吗"):
+        return True
+    return any(w in t for w in _QUESTION_WORDS)
+
+
+# 无实际内容的输入（语气词/确认词），不触发任何 agent 动作
+_IGNORE_WORDS: frozenset[str] = frozenset({
+    "嗯", "哦", "好", "好的", "ok", "okay", "对", "是的", "知道了", "行", "可以",
+    "没问题", "收到", "继续", "嗯嗯", "好的吧", "行吧", "就这样", "嗯嗯嗯",
+})
+
+
+def _is_noop_input(text: str) -> bool:
+    """无实际内容（语气词/确认词/过短）→ 不触发任何 agent 动作。"""
+    return text.lower() in _IGNORE_WORDS or len(text) <= 1
+
+
+# 明确的"项目需求"表达（含需求动作词），只有这些才触发需求澄清
+_REQUIREMENT_MARKERS: tuple[str, ...] = (
+    "帮我", "帮我写", "给我", "给我写", "我要", "我想要", "我想做", "要做",
+    "写一个", "写个", "做一个", "做个", "开发", "创建", "设计一个", "实现一个", "来个",
+)
+
+
+def _is_requirement(text: str) -> bool:
+    """识别明确的"项目需求"表达（含需求动作词）。"""
+    return any(m in text for m in _REQUIREMENT_MARKERS)
 
 
 def _print_help() -> None:
@@ -191,7 +218,7 @@ def _confirm_requirements(safety_mode: str, stream: bool) -> None:
         except (KeyboardInterrupt, EOFError):
             console.print("\n[bold green]需求确认完毕。输入 [cyan]编码[/] 开始实现。[/]")
             return
-        if not extra.strip():
+        if not extra.strip() or _is_noop_input(extra):
             console.print("[bold green]需求确认完毕。输入 [cyan]编码[/] 开始实现。[/]")
             return
         # 用户提问 → 直接回答，然后继续确认循环
@@ -355,11 +382,19 @@ def run_interactive_session(safety_mode: str = "auto", stream: bool = True) -> N
                 break
             continue
 
+        # 无实际内容的输入（语气词/过短）→ 直接忽略，不触发任何动作
+        if _is_noop_input(line):
+            continue
+
         if is_code_intent(line) and spec_exists():
             run_code(line, safety_mode, stream)
         elif _is_question(line):
             run_qa(line, safety_mode, stream)
         elif has_generated_code():
             run_modify(line, safety_mode, stream)
-        else:
+        elif _is_requirement(line):
             run_clarify(line, safety_mode, stream)
+        else:
+            # 其他输入：不触发任何动作，提示用户
+            console.print("[yellow]没理解你的意思。可以说需求（如\"帮我写一个游戏\"）、提问、或\"编码\"。/help 查看命令。[/]")
+            runtime.write_transcript(f"[未识别输入] {line}\n")

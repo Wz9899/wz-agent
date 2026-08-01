@@ -51,15 +51,70 @@ def test_done_requirements_phrases():
 
 
 def test_is_question():
-    """识别提问（直接回答），不把需求/指令误判为提问。"""
+    """识别明确提问（直接回答），不把需求/指令/语气误判为提问。"""
     assert session._is_question("数据来源是啥")
     assert session._is_question("用什么语言？")
     assert session._is_question("为什么这样做")
     assert session._is_question("这个怎么运行的")
+    assert session._is_question("这个游戏能玩吗")  # 短问句以"吗"结尾
     assert not session._is_question("帮我写一个猜数字游戏")
     assert not session._is_question("把范围改成 1-1000")
     assert not session._is_question("编码吧")
     assert not session._is_question("加一个计分系统")
+    assert not session._is_question("嗯")
+
+
+def test_is_noop_input():
+    """语气词/确认词/过短输入 → 不触发任何动作。"""
+    assert session._is_noop_input("嗯")
+    assert session._is_noop_input("好的")
+    assert session._is_noop_input("ok")
+    assert session._is_noop_input("")
+    assert not session._is_noop_input("帮我写一个游戏")
+
+
+def test_is_requirement():
+    """明确需求表达（含动作词）才触发需求澄清。"""
+    assert session._is_requirement("帮我写一个猜数字游戏")
+    assert session._is_requirement("做一个 NBA 游戏")
+    assert session._is_requirement("我想开发一个工具")
+    assert not session._is_requirement("数据来源是啥")
+    assert not session._is_requirement("编码吧")
+    assert not session._is_requirement("把范围改成 1-1000")
+    assert not session._is_requirement("嗯")
+
+
+def test_session_noop_input_ignored(monkeypatch):
+    """语气词输入被忽略，不触发任何 agent 动作。"""
+    answers = iter(["嗯", "好的", "/exit"])
+    monkeypatch.setattr(interactive, "prompt_human", lambda prompt: next(answers))
+    monkeypatch.setattr(session, "spec_exists", lambda: False)
+    monkeypatch.setattr(session, "has_generated_code", lambda: False)
+    called = {"clarify": [], "qa": [], "code": [], "modify": []}
+    monkeypatch.setattr(session, "run_clarify", lambda r, sm, st: called["clarify"].append(r))
+    monkeypatch.setattr(session, "run_qa", lambda q, sm, st: called["qa"].append(q))
+    monkeypatch.setattr(session, "run_code", lambda i, sm, st: called["code"].append(i))
+    monkeypatch.setattr(session, "run_modify", lambda i, sm, st: called["modify"].append(i))
+    session.run_interactive_session()
+    assert called == {"clarify": [], "qa": [], "code": [], "modify": []}
+
+
+def test_session_unrecognized_prompts(monkeypatch):
+    """无法识别的输入 → 提示，不触发任何 agent 动作。"""
+    answers = iter(["随便说说", "/exit"])
+    monkeypatch.setattr(interactive, "prompt_human", lambda prompt: next(answers))
+    monkeypatch.setattr(session, "spec_exists", lambda: False)
+    monkeypatch.setattr(session, "has_generated_code", lambda: False)
+    called = {"clarify": [], "qa": [], "code": [], "modify": []}
+    monkeypatch.setattr(session, "run_clarify", lambda r, sm, st: called["clarify"].append(r))
+    monkeypatch.setattr(session, "run_qa", lambda q, sm, st: called["qa"].append(q))
+    monkeypatch.setattr(session, "run_code", lambda i, sm, st: called["code"].append(i))
+    monkeypatch.setattr(session, "run_modify", lambda i, sm, st: called["modify"].append(i))
+    printed = []
+    monkeypatch.setattr(session.console, "print", lambda *a, **k: printed.append(a))
+    session.run_interactive_session()
+    assert called == {"clarify": [], "qa": [], "code": [], "modify": []}
+    assert any("没理解" in str(x) for x in printed)
 
 
 def test_session_question_dispatches_to_qa(monkeypatch):
