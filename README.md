@@ -51,7 +51,10 @@ cp .env.example .env   # 然后编辑 .env 填入 Key
 ### 3. 运行
 
 ```bash
-# 阶段一：需求澄清（默认）
+# 最简方式：不传任务，启动后实时输入你的需求（run.bat 即此模式）
+python src/main.py
+
+# 或直接把任务写进命令：
 python src/main.py "帮我写一个猜人游戏"
 
 # 阶段二：编码执行（需要先有 spec.md）

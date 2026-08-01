@@ -220,19 +220,22 @@ def main(
             _run_to_tickets(target, safety_mode, stream)
         return
 
-    # ---- 1. 参数校验：缺少任务描述时打印用法 ----
+    # ---- 1. 任务描述：优先命令行参数；没有则进入实时输入模式 ----
     task = " ".join(args).strip() if args else None
     if not task:
-        console.print(
-            Panel.fit(
-                "[bold red]用法:[/] python src/main.py [cyan]\"任务描述\"[/]"
-                " [--phase code] [--safety-mode plan]\n"
-                "v2.0: python src/main.py [cyan]triage|to-tickets[/]"
-                " [cyan]<feature-slug 或文件路径>[/]",
-                title="wz-agent v2.0",
+        console.print("[cyan]（未提供任务参数 —— 请直接输入你的需求）[/]")
+        task = interactive.prompt_human("\n需求 > ")
+        if not task:
+            console.print(
+                Panel.fit(
+                    "[bold red]用法:[/] python src/main.py [cyan]\"任务描述\"[/]"
+                    " [--phase code] [--safety-mode plan]\n"
+                    "v2.0: python src/main.py [cyan]triage|to-tickets[/]"
+                    " [cyan]<feature-slug 或文件路径>[/]",
+                    title="wz-agent v2.0",
+                )
             )
-        )
-        raise SystemExit(1)
+            raise SystemExit(1)
 
     # ---- 2. 校验编码阶段的前置条件（spec.md 必须存在）----
     # 不依赖 API Key，优先检查 —— spec 缺失是比缺 key 更根本的问题
