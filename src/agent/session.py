@@ -3,8 +3,12 @@
 启动 `python src/main.py`（无参数）进入本会话：
   - 输入需求 → 澄清（agent 逐轮问清）→ 写 spec.md
   - 输入"编码" → 自主编码执行（按模块，可 Ctrl-C 中断）
-  - /help /spec /exit 等斜杠命令
-会话持续直到用户退出（/exit、exit、q、Ctrl-C 或输入流结束）。
+  - 已有代码后直接说修改意见 → agent 读代码改
+  - /help /spec /clear /exit 等斜杠命令
+会话持续直到用户退出。
+
+所有产物（spec、代码）与 agent 流式输出转录集中在本次运行的独立目录
+runs/<时间戳>/（见 agent.runtime）——运行结束后可打开 session.log 回看。
 """
 
 from __future__ import annotations
@@ -14,10 +18,9 @@ from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
 
-from agent import interactive
+from agent import interactive, runtime
 from agent.context import ensure_spec, spec_exists
 from agent.loop import run_interactive
-from agent.paths import PROJECT_ROOT
 from agent.prompts import CLARIFY_SYSTEM_PROMPT, CODE_SYSTEM_PROMPT
 
 console = Console()
@@ -30,9 +33,7 @@ CODE_TRIGGERS: frozenset[str] = frozenset({
 # 退出词
 EXIT_WORDS: frozenset[str] = frozenset({"exit", "quit", "q", "退出"})
 
-# 会话内单轮最大工具调用步数。
-# 澄清阶段"多问问清楚"：每个 ask_user 消耗一步，问 5-8 个问题 + 写 spec 需要余量；
-# 编码阶段分模块实现同样需要较多步数。
+# 会话内单轮最大工具调用步数（澄清多轮问答 + 写 spec / 编码分模块都需余量）
 SESSION_MAX_STEPS: int = 30
 
 
@@ -50,13 +51,13 @@ def _print_help() -> None:
     console.print("[cyan]可用命令:[/]")
     console.print("  [bold]/help[/]    显示本帮助")
     console.print("  [bold]/spec[/]    查看当前 spec.md 内容")
-    console.print("  [bold]/clear[/]   清空 output/ 和 spec.md（重新开始）")
+    console.print("  [bold]/clear[/]   清空本次运行的代码和 spec（重新开始）")
     console.print("  [bold]/exit[/]    退出会话（或输入 exit / q / Ctrl-C）")
     console.print("")
     console.print("直接输入:")
     console.print("  [bold]<需求描述>[/]  需求澄清：agent 逐轮问清后写 spec.md")
     console.print("  [bold]编码[/]        进入编码执行（需先有 spec.md，按模块自主实现）")
-    console.print("  [bold]<修改意见>[/]  已有代码后直接说修改意见（如\"把范围改成 1-1000\"），agent 会改代码")
+    console.print("  [bold]<修改意见>[/]  已有代码后直接说修改意见，agent 会改代码")
 
 
 def _handle_command(line: str) -> str:
@@ -81,9 +82,17 @@ def _handle_command(line: str) -> str:
 def run_clarify(requirement: str, safety_mode: str, stream: bool) -> None:
     """需求澄清：agent 逐轮问清后写 spec.md。"""
     console.print("[bold green]需求澄清...[/]")
+    runtime.write_transcript(f"\n===== 需求澄清 =====\n{requirement}\n")
+    spec_target = runtime.spec_path()
+    task = (
+        f"{requirement}\n\n"
+        f"===== 输出位置 =====\n"
+        f"请把最终需求写入 spec.md。spec.md 的完整路径是（用 write 工具写入该路径）：\n"
+        f"{spec_target}\n"
+    )
     result = run_interactive(
         CLARIFY_SYSTEM_PROMPT,
-        requirement,
+        task,
         retry=False,
         max_steps=SESSION_MAX_STEPS,
         bash_safety_mode=safety_mode,
@@ -92,7 +101,7 @@ def run_clarify(requirement: str, safety_mode: str, stream: bool) -> None:
     if not interactive.is_terminal(result):
         console.print(result, markup=False)
     if spec_exists():
-        console.print("\n[bold green]spec.md 已写入。输入 [cyan]编码[/] 开始实现，或继续描述需求。[/]")
+        console.print(f"\n[bold green]spec.md 已写入: {spec_target}。输入 [cyan]编码[/] 开始实现。[/]")
     else:
         console.print(f"\n[yellow]未生成 spec.md：{result}[/]", markup=False)
 
@@ -103,7 +112,15 @@ def run_code(instruction: str, safety_mode: str, stream: bool) -> None:
         console.print("[yellow]还没有 spec.md —— 先输入需求澄清。[/]")
         return
     spec = ensure_spec()
-    task = f"{instruction}\n\n===== spec.md 项目级上下文 =====\n{spec}"
+    out_dir = runtime.output_dir()
+    runtime.write_transcript(f"\n===== 编码执行 =====\n{instruction}\n")
+    task = (
+        f"{instruction}\n\n"
+        f"===== spec.md 项目级上下文 =====\n{spec}\n\n"
+        f"===== 输出位置 =====\n"
+        f"所有生成的代码写入目录（绝对路径，write 会自动创建）：\n{out_dir}\n"
+        f"每个任务生成一个单独的主文件，不要写到别处。"
+    )
     console.print("[bold green]编码执行...[/]")
     result = run_interactive(
         CODE_SYSTEM_PROMPT,
@@ -113,7 +130,7 @@ def run_code(instruction: str, safety_mode: str, stream: bool) -> None:
         bash_safety_mode=safety_mode,
         stream=stream,
     )
-    console.print("\n[bold green]本轮编码结束。输入修改意见/新需求继续，/exit 退出。[/]")
+    console.print(f"\n[bold green]本轮编码结束。产物在 {out_dir}。输入修改意见/新需求继续，/exit 退出。[/]")
 
 
 # ============================================================
@@ -122,8 +139,8 @@ def run_code(instruction: str, safety_mode: str, stream: bool) -> None:
 
 
 def _generated_code_files() -> list[Path]:
-    """output/ 目录下已生成的 .py 文件（按修改时间倒序）。"""
-    out = PROJECT_ROOT / "output"
+    """本次运行 output/ 目录下已生成的 .py 文件（按修改时间倒序）。"""
+    out = runtime.output_dir()
     if not out.is_dir():
         return []
     return sorted(out.glob("*.py"), key=lambda p: p.stat().st_mtime, reverse=True)
@@ -140,7 +157,9 @@ def run_modify(instruction: str, safety_mode: str, stream: bool) -> None:
     if not files:
         console.print("[yellow]还没有已生成的代码 —— 先输入需求澄清 + 编码。[/]")
         return
+    runtime.write_transcript(f"\n===== 修改反馈 =====\n{instruction}\n")
     file_list = "\n".join(f"  - {f.name}" for f in files)
+    out_dir = runtime.output_dir()
     spec_ctx = f"\n\n===== spec.md 项目级上下文 =====\n{ensure_spec()}" if spec_exists() else ""
     task = (
         f"用户输入：{instruction}\n\n"
@@ -150,6 +169,7 @@ def run_modify(instruction: str, safety_mode: str, stream: bool) -> None:
         f"修改后运行验证，最后报告改了什么、如何验证。\n"
         f"  - 如果是【对现有代码的提问/解释请求】→ 直接 read 相关文件并回答，回复以 [DONE] 开头。\n"
         f"  - 不要创建新文件覆盖现有实现，除非确实需要。\n"
+        f"代码目录（绝对路径）：{out_dir}\n"
         f"{spec_ctx}"
     )
     console.print("[bold green]修改代码...[/]")
@@ -161,13 +181,13 @@ def run_modify(instruction: str, safety_mode: str, stream: bool) -> None:
         bash_safety_mode=safety_mode,
         stream=stream,
     )
-    console.print("\n[bold green]修改完成。继续反馈/指令，/exit 退出。[/]")
+    console.print(f"\n[bold green]修改完成。代码在 {out_dir}。继续反馈/指令，/exit 退出。[/]")
 
 
 def _clear_outputs() -> None:
-    """清空 output/ 与 spec.md，重新开始（需确认）。"""
+    """清空本次运行的代码与 spec，重新开始（需确认）。"""
     try:
-        confirm = interactive.prompt_human("确认清空 output/ 和 spec.md，重新开始？[y/N] > ")
+        confirm = interactive.prompt_human("确认清空本次运行的代码和 spec.md？[y/N] > ")
     except (EOFError, KeyboardInterrupt):
         console.print("\n[yellow]已取消。[/]")
         return
@@ -175,18 +195,20 @@ def _clear_outputs() -> None:
         console.print("[yellow]已取消。[/]")
         return
     import shutil
-    out = PROJECT_ROOT / "output"
+    out = runtime.output_dir()
     if out.is_dir():
         shutil.rmtree(out)
-    spec = PROJECT_ROOT / "spec.md"
+    spec = runtime.spec_path()
     if spec.is_file():
         spec.unlink()
-    console.print("[yellow]已清空 output/ 和 spec.md，可以开始新需求。[/]")
+    console.print("[yellow]已清空本次运行的代码和 spec.md，可以开始新需求。[/]")
 
 
 def run_interactive_session(safety_mode: str = "auto", stream: bool = True) -> None:
     """交互会话主循环：持续对话直到用户退出。"""
     interactive.ENABLED = True  # 会话模式始终允许 agent 追问
+    run_dir = runtime.start_run()
+    console.print(f"[cyan]本次运行目录: {run_dir}（产物与 session.log 都在这里）[/]")
     console.print("[cyan]wz-agent 交互会话。输入需求开始；/help 查看命令；/exit 或 Ctrl-C 退出。[/]")
     _print_help()
 
@@ -195,13 +217,14 @@ def run_interactive_session(safety_mode: str = "auto", stream: bool = True) -> N
             prompt = "\n> " if spec_exists() else "\n需求 > "
             line = interactive.prompt_human(prompt)
         except (KeyboardInterrupt, EOFError):
-            # 会话空闲（等输入）时 Ctrl-C 或输入流结束 → 退出
             console.print("\n[yellow]再见。[/]")
             break
 
         line = line.strip()
         if not line:
             continue
+        runtime.write_transcript(f"用户输入: {line}\n")
+
         if line.lower() in EXIT_WORDS:
             console.print("[cyan]再见。[/]")
             break

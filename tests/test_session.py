@@ -1,6 +1,16 @@
 """交互会话单元测试：意图识别、命令分发、会话主循环。"""
 
-from agent import interactive, session
+from pathlib import Path
+
+import pytest
+
+from agent import interactive, runtime, session
+
+
+@pytest.fixture(autouse=True)
+def _isolate_run_dir(tmp_path, monkeypatch):
+    """把 runs/ 重定向到临时目录，避免测试创建真实运行产物。"""
+    monkeypatch.setattr(runtime, "RUNS_DIR", tmp_path)
 
 
 # ---------- is_code_intent ----------
@@ -132,17 +142,13 @@ def test_session_modify_intent_dispatches_to_modify(monkeypatch):
     assert called["clarify"] == []
 
 
-def test_has_generated_code_true(monkeypatch, tmp_path):
-    """output/ 下有 .py 文件 → True。"""
-    out = tmp_path / "output"
-    out.mkdir()
-    (out / "game.py").write_text("print('hi')", encoding="utf-8")
-    monkeypatch.setattr(session, "PROJECT_ROOT", tmp_path)
+def test_has_generated_code_true(monkeypatch):
+    monkeypatch.setattr(session, "_generated_code_files", lambda: [Path("game.py")])
     assert session.has_generated_code() is True
 
 
-def test_has_generated_code_false(monkeypatch, tmp_path):
-    monkeypatch.setattr(session, "PROJECT_ROOT", tmp_path)
+def test_has_generated_code_false(monkeypatch):
+    monkeypatch.setattr(session, "_generated_code_files", lambda: [])
     assert session.has_generated_code() is False
 
 

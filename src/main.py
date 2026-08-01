@@ -33,7 +33,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 os.chdir(PROJECT_ROOT)
 
-from agent import interactive, issues
+from agent import interactive, issues, runtime
 from agent.context import MISSING_SPEC_MESSAGE, ensure_spec, spec_exists
 from agent.loop import run_interactive, run_with_retry
 from agent.session import SESSION_MAX_STEPS, run_interactive_session
@@ -84,6 +84,8 @@ def _run_agent(
     """
     # triage / to-tickets 是自动化流程：强制非交互，避免 LLM 误调 ask_user 阻塞
     interactive.ENABLED = False
+    run_dir = runtime.start_run()
+    console.print(f"[cyan]本次运行目录: {run_dir}[/]")
 
     if not _check_api_key():
         raise SystemExit(1)
@@ -228,6 +230,10 @@ def main(
             raise SystemExit(1)
         run_interactive_session(safety_mode=safety_mode, stream=stream)
         return
+
+    # 一次性模式（有任务参数）：创建本次运行目录
+    run_dir = runtime.start_run()
+    console.print(f"[cyan]本次运行目录: {run_dir}[/]")
 
     # ---- 2. 校验编码阶段的前置条件（spec.md 必须存在）----
     # 不依赖 API Key，优先检查 —— spec 缺失是比缺 key 更根本的问题

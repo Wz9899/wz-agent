@@ -99,7 +99,7 @@ wz-agent/
 ├── requirements.txt        # Python 依赖
 ├── .env.example            # 环境变量模板（复制为 .env）
 ├── test_api.py             # API 连通性测试
-├── output/                 # 编码阶段生成的代码（一个任务一个文件）
+├── runs/                   # 每次运行的工作区：<时间戳>/ 下 spec.md + output/ + session.log
 ├── .scratch/               # 本地 issue tracker（issue-tracker.md 约定）
 │   └── <feature-slug>/
 │       ├── spec.md         # 该 feature 的需求规格

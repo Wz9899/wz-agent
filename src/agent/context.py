@@ -1,18 +1,19 @@
 """上下文管理 —— spec.md 的读写与定位。
 
-spec.md 是编码执行阶段的唯一输入（项目级上下文），固定存放在项目根目录。
+spec.md 是编码执行阶段的唯一输入（项目级上下文），存放在**本次运行的
+独立目录**（runs/<时间戳>/spec.md，见 agent.runtime）。
 
 上下文管理策略（与 CONTEXT.md 一致）：
     - spec.md 提供项目级上下文，编码阶段启动时自动注入。
     - 文件系统即代码索引 —— 不预索引，靠 read 工具按需读取已生成文件。
 
-本模块只负责根目录 spec.md 的定位、读写与存在性校验。
+本模块只负责运行目录 spec.md 的定位、读写与存在性校验。
 （feature 级 spec 的定位见 agent.issues.spec_path，两者是不同概念。）
 """
 
 from pathlib import Path
 
-from agent.paths import PROJECT_ROOT, SPEC_FILENAME
+from agent import runtime
 
 # 缺少 spec.md 时的统一提示（ensure_spec 异常与 main.py 用法提示共用）
 MISSING_SPEC_MESSAGE: str = (
@@ -24,12 +25,13 @@ MISSING_SPEC_MESSAGE: str = (
 
 
 def root_spec_path() -> Path:
-    """返回根目录 spec.md 的完整路径。
+    """返回本次运行目录 spec.md 的完整路径。
 
-    与 agent.issues.spec_path(slug) 不同：本函数定位项目根级 spec.md
-    （v1.0 澄清/编码流程使用），后者定位 feature 级 spec.md（v2.0 拆解流程）。
+    与 agent.issues.spec_path(slug) 不同：本函数定位运行根级 spec.md
+    （澄清/编码流程使用），后者定位 feature 级 spec.md（v2.0 拆解流程）。
+    路径随每次运行变化：runs/<时间戳>/spec.md。
     """
-    return PROJECT_ROOT / SPEC_FILENAME
+    return runtime.spec_path()
 
 
 def spec_exists() -> bool:

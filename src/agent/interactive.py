@@ -10,6 +10,8 @@ from __future__ import annotations
 import sys
 from typing import Literal
 
+from agent import runtime
+
 # ============================================================
 # 交互状态
 # ============================================================
@@ -28,18 +30,23 @@ TERMINAL_PREFIXES: tuple[str, ...] = ("[DONE]", "[ERR]", "[WARN]", "[API-ERR]", 
 
 
 def print_human(text: str, *, end: str = "\n") -> None:
-    """编码安全打印：仅把当前输出编码无法表示的字符（如 emoji、⚠）替换为 '?'。
+    """编码安全打印 + 同步写入运行转录（session.log）。
+
+    仅把当前输出编码无法表示的字符（如 emoji、⚠）替换为 '?'。流式文本与
+    工具调用展示都走这里——因此 agent 在终端的输出会自动保存为运行回放，
+    运行结束后可打开 runs/<时间戳>/session.log 回看。
 
     Windows 控制台/重定向通常用 cp936（GBK），中文可编码但 emoji 不行——
-    LLM 自由输出常带这类字符。流式文本与工具调用展示都走这里，避免
-    UnicodeEncodeError 中断 agent；中文得以保留。
+    LLM 自由输出常带这类字符。这里避免 UnicodeEncodeError 中断 agent。
     """
     try:
         print(text, end=end, flush=True)
+        runtime.write_transcript(text + end)
     except UnicodeEncodeError:
         enc = getattr(sys.stdout, "encoding", None) or "utf-8"
         safe = text.encode(enc, errors="replace").decode(enc)
         print(safe, end=end, flush=True)
+        runtime.write_transcript(safe + end)
 
 
 def strip_surrogates(text: str) -> str:
