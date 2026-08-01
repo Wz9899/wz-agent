@@ -239,6 +239,7 @@ class BashTool(BaseTool):
                 shell=True,
                 capture_output=True,
                 text=True,
+                errors="replace",   # 非法字节替换为 �，避免读取线程解码崩溃导致流为 None
                 timeout=self.TIMEOUT,
             )
         except subprocess.TimeoutExpired:
@@ -252,14 +253,17 @@ class BashTool(BaseTool):
         except Exception as e:
             return f"[ERR] 执行出错：{e}"
 
-        # 拼接 stdout 和 stderr
+        # 拼接 stdout 和 stderr（None 防御：极端情况下子进程流可能为 None）
         output_parts: list[str] = []
 
-        if result.stdout.strip():
-            output_parts.append(result.stdout.rstrip())
+        stdout_text = (result.stdout or "").strip()
+        stderr_text = (result.stderr or "").strip()
 
-        if result.stderr.strip():
-            output_parts.append(f"[stderr]\n{result.stderr.rstrip()}")
+        if stdout_text:
+            output_parts.append((result.stdout or "").rstrip())
+
+        if stderr_text:
+            output_parts.append(f"[stderr]\n{(result.stderr or '').rstrip()}")
 
         if not output_parts:
             return "（命令执行完毕，无输出）"

@@ -1,5 +1,7 @@
 """bash 工具单元测试：危险命令拦截 + auto/plan 双模式状态机。"""
 
+import subprocess
+
 import pytest
 
 from agent.tools.bash import BashTool
@@ -97,3 +99,33 @@ def test_plan_description_mentions_special_commands(tool):
     assert "__execute_plan__" in tool.description
     tool.mode = "auto"
     assert "__execute_plan__" not in tool.description
+
+
+# ---------- Windows 编码崩溃回归 ----------
+
+
+def test_execute_handles_none_streams(monkeypatch):
+    """子进程 stdout/stderr 为 None 时不崩溃（Windows 编码失败曾导致 NoneType.strip）。"""
+    tool = BashTool()
+    monkeypatch.setattr(
+        "agent.tools.bash.subprocess.run",
+        lambda *a, **k: subprocess.CompletedProcess(
+            args="", returncode=0, stdout=None, stderr=None
+        ),
+    )
+    out = tool._execute_one("some command")
+    assert "无输出" in out
+
+
+def test_execute_handles_stderr_content(monkeypatch):
+    """stderr 有内容时正常拼接进结果（含 [stderr] 标记）。"""
+    tool = BashTool()
+    monkeypatch.setattr(
+        "agent.tools.bash.subprocess.run",
+        lambda *a, **k: subprocess.CompletedProcess(
+            args="", returncode=0, stdout="ok", stderr="some error"
+        ),
+    )
+    out = tool._execute_one("some command")
+    assert "[stderr]" in out
+    assert "some error" in out
