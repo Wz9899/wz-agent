@@ -43,6 +43,11 @@ $env:DEEPSEEK_API_KEY="sk-你的key"
 export DEEPSEEK_API_KEY="sk-你的key"
 ```
 
+**或使用 `.env` 文件**（推荐，自动加载）:
+```bash
+cp .env.example .env   # 然后编辑 .env 填入 Key
+```
+
 ### 3. 运行
 
 ```bash
@@ -62,6 +67,18 @@ python src/main.py to-tickets <feature-slug 或 spec 文件路径>
 python src/main.py "帮我写一个猜人游戏" --safety-mode plan
 ```
 
+## 安全边界
+
+> bash 工具内置的两道防护只是**防呆，不是安全边界**。
+
+- **危险命令黑名单**：只拦截少数已知模式（如 `rm -rf /`），黑名单可轻易绕过
+  （`rm -r -f /`、`rm -rf ~/x` 等变体都不在名单内）。
+- **30 秒超时**：命令不会无限挂起。
+
+真正可靠的闸门是 **plan 安全模式**（`--safety-mode plan`）：命令先收集到计划，
+人工确认后批量执行。在 **auto 模式**下命令直接执行，安全完全依赖模型自律。
+**不要**在含重要数据的环境用 auto 模式运行不受信任的任务。
+
 ## 项目结构
 
 ```
@@ -70,6 +87,7 @@ wz-agent/
 ├── PROGRESS.md             # 开发进度（AI agent 读这个）
 ├── README.md               # 你正在看的
 ├── requirements.txt        # Python 依赖
+├── .env.example            # 环境变量模板（复制为 .env）
 ├── test_api.py             # API 连通性测试
 ├── .scratch/               # 本地 issue tracker（issue-tracker.md 约定）
 │   └── <feature-slug>/
