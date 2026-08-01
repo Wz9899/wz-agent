@@ -44,7 +44,7 @@ def run(
     bash_safety_mode: str = "auto",
 ) -> str:
     """
-    执行 ReAct 循环：思考 → 行动 → 观察 → 再思考，直到任务完成。
+    执行单轮 ReAct 循环：思考 → 行动 → 观察 → 再思考，直到任务完成。
 
     参数:
         system_prompt:    系统提示词，定义 agent 的行为规则。
@@ -55,16 +55,92 @@ def run(
     返回:
         模型的最终文本回复；如因异常提前终止则返回错误描述。
     """
-    # ---- 0. 设置 bash 安全模式并生成工具 schema ----
-    bash_tool = get_bash_tool()
-    bash_tool.mode = bash_safety_mode
-    tool_schemas = [tool.to_openai_function() for tool in ALL_TOOLS.values()]
-
-    # ---- 1. 初始化对话历史 ----
     messages: list[dict] = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_message},
     ]
+    return _run_loop(messages, bash_safety_mode=bash_safety_mode, max_steps=max_steps)
+
+
+def run_with_retry(
+    system_prompt: str,
+    user_message: str,
+    max_steps: int = 10,
+    bash_safety_mode: str = "auto",
+    max_retries: int = 3,
+) -> str:
+    """
+    带自动修复的 ReAct 循环：失败时把错误详情回喂给 LLM 继续修复。
+
+    触发重试的条件：一轮执行返回的结果以 '[ERR]' 或 '[WARN]' 开头
+    （API 调用失败、工具执行异常、达到步数上限）。
+    此时把失败详情作为新的用户消息让 LLM 分析原因并修复，
+    最多重试 max_retries 次（默认 3）。
+
+    参数:
+        system_prompt:    系统提示词。
+        user_message:     用户输入的任务描述。
+        max_steps:        每轮 ReAct 循环的最大工具调用次数。
+        bash_safety_mode: Bash 安全模式。
+        max_retries:      失败后的最大自动修复次数，默认 3。
+
+    返回:
+        成功的最终回复；重试用尽后返回错误描述（含最后一次失败详情）。
+    """
+    messages: list[dict] = [{"role": "system", "content": system_prompt}]
+
+    for attempt in range(max_retries + 1):
+        # 第一轮用原始任务，后续轮次把失败详情回喂给 LLM
+        if attempt == 0:
+            messages.append({"role": "user", "content": user_message})
+        else:
+            messages.append({
+                "role": "user",
+                "content": (
+                    "上一轮执行未成功。请分析失败原因，"
+                    "修复问题后继续完成原本的任务。\n\n失败详情:\n"
+                    + result
+                ),
+            })
+
+        result = _run_loop(
+            messages,
+            bash_safety_mode=bash_safety_mode,
+            max_steps=max_steps,
+        )
+
+        # 成功（非 [ERR]/[WARN] 开头）—— 立即返回
+        if not result.startswith("[ERR]") and not result.startswith("[WARN]"):
+            return result
+
+    # 重试用尽
+    return (
+        f"[ERR] 自动修复 {max_retries} 次后仍未成功，需要人工介入。\n\n"
+        f"最后一次失败详情:\n{result}"
+    )
+
+
+def _run_loop(
+    messages: list[dict],
+    bash_safety_mode: str = "auto",
+    max_steps: int = 10,
+) -> str:
+    """
+    单轮 ReAct 循环核心：在给定的消息列表上持续调用 LLM，直到任务完成。
+
+    参数:
+        messages:         当前对话历史（system + user + 之前的工具结果）。
+                          由调用方负责构建，调用后可继续复用（用于重试）。
+        bash_safety_mode: Bash 安全模式 —— 'auto'（直接执行）或 'plan'（先收集后确认执行）。
+        max_steps:        最大工具调用次数（硬上限，防止死循环）。
+
+    返回:
+        模型的最终文本回复；如因异常提前终止则返回错误描述。
+    """
+    # ---- 0. 设置 bash 安全模式并生成工具 schema ----
+    bash_tool = get_bash_tool()
+    bash_tool.mode = bash_safety_mode
+    tool_schemas = [tool.to_openai_function() for tool in ALL_TOOLS.values()]
 
     step = 0
 

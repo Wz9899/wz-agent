@@ -2,7 +2,7 @@
 
 一个从零手搓的通用编码助手——主动追问需求，自动生成代码。
 
-> 🚧 开发中 | 当前版本：v0.4 — 双阶段 Prompt（需求澄清 + 编码执行）
+> ✅ 当前版本：v1.0 — CLI 完整交互 + 自动修复重试 + spec 上下文注入
 
 ## 功能规划
 
@@ -13,7 +13,7 @@
 | v0.3 | Bash 安全模式 — auto/plan 双模式 | ✅ |
 | v0.4 | 需求澄清 —— Agent 主动追问用户 | ✅ |
 | v0.5 | 编码执行 —— 根据 Spec 自动生成代码 | ✅ |
-| v1.0 | CLI 完整交互 + bash 安全模式 | ⏳ |
+| v1.0 | CLI 完整交互 + bash 安全模式 | ✅ |
 | v2.0 | 集成 triage（issue 管理）+ to-tickets（任务拆解） | 📋 |
 
 ## 技术栈
@@ -65,9 +65,10 @@ wz-agent/
 ├── requirements.txt        # Python 依赖
 ├── test_api.py             # API 连通性测试
 └── src/
-    ├── main.py             # 入口脚本
+    ├── main.py             # 入口脚本（click + rich）
     └── agent/
-        ├── loop.py         # ReAct 循环引擎（v2：完整工具调用）
+        ├── loop.py         # ReAct 循环引擎（v2：完整工具调用 + 自动重试）
+        ├── context.py      # 上下文管理（spec.md 定位/读写/注入）
         ├── tools/          # 工具实现（read/write/edit/bash）
         └── prompts/        # 系统提示词（clarify=需求澄清 / code=编码执行）
 ```
