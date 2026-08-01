@@ -16,8 +16,15 @@ from agent.tools import ALL_TOOLS, get_bash_tool
 # 常量
 # ============================================================
 
-# 工具执行结果的截断上限（字符数），防止 messages 膨胀
+# 工具执行结果的截断上限（字符数），防止单条结果膨胀
 MAX_TOOL_RESULT_CHARS: int = 2000
+
+# 消息历史总量预算（字符数）：超过后压缩早期轮次，防止长任务上下文无限膨胀。
+# 粗略估算：单轮 LLM 回复 + 工具结果约 1-4k 字符，40k 预算可容纳十余轮。
+MAX_CONTEXT_CHARS: int = 40_000
+
+# 压缩时至少保留的最近"轮"数（一轮 = 一次 assistant 工具调用 + 其结果）
+KEEP_HISTORY_ROUNDS: int = 6
 
 # ============================================================
 # DeepSeek 客户端（惰性初始化）
@@ -45,6 +52,67 @@ def _get_client() -> OpenAI:
 # bash 工具的 description 会随 mode 变化而改变，
 # 每次 run() 时重新生成以反映当前安全模式。
 # 性能影响可忽略（4 个工具的反射远快于一次 API 调用）。
+
+# ============================================================
+# 历史压缩（防 context 膨胀）
+# ============================================================
+
+
+def _estimate_chars(messages: list[dict]) -> int:
+    """粗略估算消息列表总字符数（content + 序列化 tool_calls）。
+
+    仅用于预算判断，不追求精确——固定消息开销忽略不计。
+    """
+    total = 0
+    for m in messages:
+        content = m.get("content") or ""
+        total += len(content)
+        calls = m.get("tool_calls")
+        if calls:
+            total += len(json.dumps(calls, ensure_ascii=False))
+    return total
+
+
+def _maybe_compact(messages: list[dict]) -> None:
+    """消息总量超过预算时，就地压缩历史：保留 system + 首条 user + 最近 N 轮。
+
+    结构假设：[system, user, (assistant, tool*)*, ...]。
+    被丢弃的中间轮次是已完成的早期工具操作；任务定义在 system 与首条 user 中，
+    最近 KEEP_HISTORY_ROUNDS 轮保留当前工作状态，因此压缩不丢失任务本身。
+    压缩后插入一条 system 提示，避免 LLM 因记录减少而困惑。
+
+    按"轮"为单位裁剪，保证保留的 assistant 与其 tool 结果始终成对，
+    不会产生 openai API 拒绝的孤立 tool 消息。
+    """
+    if _estimate_chars(messages) <= MAX_CONTEXT_CHARS:
+        return
+
+    head = messages[:2]          # system + 首条 user（任务定义）
+    tail = messages[2:]
+
+    # 从尾部逆序收集最近 KEEP_HISTORY_ROUNDS 轮
+    rounds: list[list[dict]] = []
+    current: list[dict] = []
+    for m in reversed(tail):
+        current.insert(0, m)
+        if m.get("role") == "assistant":
+            rounds.insert(0, current)
+            current = []
+            if len(rounds) >= KEEP_HISTORY_ROUNDS:
+                break
+
+    messages[:] = head + [m for r in rounds for m in r]
+    messages.insert(
+        len(head),
+        {
+            "role": "system",
+            "content": (
+                "（为控制上下文长度，较早的工具调用记录已移除。"
+                "请基于当前对话中的最新状态继续原任务。）"
+            ),
+        },
+    )
+
 
 # ============================================================
 # ReAct 循环
@@ -224,6 +292,9 @@ def _run_loop(
                     "tool_call_id": tool_call.id,
                     "content": tool_result,
                 })
+
+                # 3f. 历史超预算时压缩早期轮次，防止长任务上下文无限膨胀
+                _maybe_compact(messages)
         else:
             # 3f. 纯文本回复 —— 任务完成
             return msg.content or ""
