@@ -5,6 +5,8 @@ from agent.tools.read import ReadTool
 from agent.tools.write import WriteTool
 from agent.tools.edit import EditTool
 from agent.tools.bash import BashTool
+from agent.tools.triage import ListIssuesTool, SetIssueStatusTool
+from agent.tools.tickets import AllocateIssueTool
 
 # 按名称索引的工具实例
 ALL_TOOLS: dict[str, BaseTool] = {}
@@ -41,3 +43,7 @@ _register(EditTool())
 _bash = BashTool()
 _BASH_TOOL = _bash
 _register(_bash)
+
+_register(ListIssuesTool())
+_register(SetIssueStatusTool())
+_register(AllocateIssueTool())

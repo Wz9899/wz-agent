@@ -15,3 +15,6 @@ PROGRESS.md
 test_api.py
 AGENTS.md
 docs/agents/
+
+# 本地 issue tracker 运行产物（triage / to-tickets 生成）
+.scratch/
