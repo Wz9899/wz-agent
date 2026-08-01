@@ -67,6 +67,24 @@ def _is_done_requirements(text: str) -> bool:
     return any(p in text for p in _DONE_PHRASES)
 
 
+# 疑问句特征（识别用户提问，直接回答而非当需求）
+_QUESTION_WORDS: tuple[str, ...] = (
+    "是啥", "是什么", "为什么", "为啥", "怎么", "如何", "在哪", "哪个", "哪些",
+    "是不是", "能否", "可以吗", "吗", "呢",
+)
+
+
+def _is_question(text: str) -> bool:
+    """识别用户输入是否为提问（直接回答，而非需求/指令）。
+
+    以问号结尾，或含疑问特征词 → 视为提问。即使偶尔误判，run_qa 的
+    agent 也会兜底判断（是需求则退回澄清），不会丢失需求。
+    """
+    if text.rstrip().endswith(("？", "?")):
+        return True
+    return any(w in text for w in _QUESTION_WORDS)
+
+
 def _print_help() -> None:
     console.print("[cyan]可用命令:[/]")
     console.print("  [bold]/help[/]    显示本帮助")
@@ -127,6 +145,40 @@ def run_clarify(requirement: str, safety_mode: str, stream: bool) -> None:
         console.print(f"\n[yellow]未生成 spec.md：{result}[/]", markup=False)
 
 
+def run_qa(question: str, safety_mode: str, stream: bool) -> None:
+    """直接回答用户的问题，不进入需求澄清/补充流程。
+
+    让 agent 判断输入：若是提问（如"数据来源是啥"）则直接简洁回答并以
+    [DONE] 结束本轮；若实际是需求则退回澄清流程（兜底，避免误判丢需求）。
+    """
+    console.print("[bold green]回答...[/]")
+    runtime.write_transcript(f"\n===== 直接回答 =====\n{question}\n")
+    context = ""
+    if spec_exists():
+        context += f"\n当前 spec.md 概要：{ensure_spec()[:400]}\n"
+    files = _generated_code_files()
+    if files:
+        context += f"当前已生成代码：{', '.join(f.name for f in files)}\n"
+    task = (
+        f"用户输入：{question}\n\n"
+        f"请判断并处理：\n"
+        f"  - 如果是【对 agent 的提问/闲聊】（问数据来源、为什么、解释某概念等）→ "
+        f"直接简洁回答，回复以 [DONE] 开头结束本轮，不要写 spec、不要改代码。\n"
+        f"  - 如果是【项目需求】（要做个软件/功能）→ 走需求澄清流程，写 spec.md。\n"
+        f"{context}"
+    )
+    result = run_interactive(
+        CLARIFY_SYSTEM_PROMPT,
+        task,
+        retry=False,
+        max_steps=SESSION_MAX_STEPS,
+        bash_safety_mode=safety_mode,
+        stream=stream,
+    )
+    if not interactive.is_terminal(result):
+        console.print(result, markup=False)
+
+
 def _confirm_requirements(safety_mode: str, stream: bool) -> None:
     """需求确认环节：澄清写完 spec 后，循环询问是否还有补充，直到确认完整。
 
@@ -142,6 +194,10 @@ def _confirm_requirements(safety_mode: str, stream: bool) -> None:
         if not extra.strip():
             console.print("[bold green]需求确认完毕。输入 [cyan]编码[/] 开始实现。[/]")
             return
+        # 用户提问 → 直接回答，然后继续确认循环
+        if _is_question(extra):
+            run_qa(extra, safety_mode, stream)
+            continue
         # 用户明确要开始编码 → 直接进入编码，不当作补充需求
         if is_code_intent(extra):
             console.print("[bold green]需求确认完毕，开始编码。[/]")
@@ -301,6 +357,8 @@ def run_interactive_session(safety_mode: str = "auto", stream: bool = True) -> N
 
         if is_code_intent(line) and spec_exists():
             run_code(line, safety_mode, stream)
+        elif _is_question(line):
+            run_qa(line, safety_mode, stream)
         elif has_generated_code():
             run_modify(line, safety_mode, stream)
         else:

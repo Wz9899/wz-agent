@@ -50,6 +50,32 @@ def test_done_requirements_phrases():
     assert not session._is_done_requirements("没有做计分系统")  # 补充内容不误判
 
 
+def test_is_question():
+    """识别提问（直接回答），不把需求/指令误判为提问。"""
+    assert session._is_question("数据来源是啥")
+    assert session._is_question("用什么语言？")
+    assert session._is_question("为什么这样做")
+    assert session._is_question("这个怎么运行的")
+    assert not session._is_question("帮我写一个猜数字游戏")
+    assert not session._is_question("把范围改成 1-1000")
+    assert not session._is_question("编码吧")
+    assert not session._is_question("加一个计分系统")
+
+
+def test_session_question_dispatches_to_qa(monkeypatch):
+    """输入提问 → run_qa，不当作需求澄清。"""
+    answers = iter(["数据来源是啥", "/exit"])
+    monkeypatch.setattr(interactive, "prompt_human", lambda prompt: next(answers))
+    monkeypatch.setattr(session, "spec_exists", lambda: False)
+    monkeypatch.setattr(session, "has_generated_code", lambda: False)
+    called = {"qa": [], "clarify": []}
+    monkeypatch.setattr(session, "run_qa", lambda q, sm, st: called["qa"].append(q))
+    monkeypatch.setattr(session, "run_clarify", lambda r, sm, st: called["clarify"].append(r))
+    session.run_interactive_session()
+    assert called["qa"] == ["数据来源是啥"]
+    assert called["clarify"] == []
+
+
 # ---------- _handle_command ----------
 
 
