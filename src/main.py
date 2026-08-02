@@ -189,12 +189,20 @@ def _run_to_tickets(target: str, safety_mode: str, stream: bool) -> None:
     default=False,
     help="关闭人机交互（clarify/code 阶段 agent 不再中途停下询问，一次跑完）",
 )
+@click.option(
+    "--run",
+    "run_opt",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="复用指定运行目录调试（如 runs/20260802_113114），不新建；沿用其中 spec 与代码",
+)
 def main(
     args: tuple[str, ...],
     safety_mode: str,
     phase: str,
     no_stream: bool,
     no_interactive: bool,
+    run_opt: Path | None,
 ) -> None:
     """wz-agent — 通用编码助手：主动追问需求，自动生成代码。"""
 
@@ -228,11 +236,11 @@ def main(
     if not task:
         if not _check_api_key():
             raise SystemExit(1)
-        run_interactive_session(safety_mode=safety_mode, stream=stream)
+        run_interactive_session(safety_mode=safety_mode, stream=stream, run_dir=run_opt)
         return
 
-    # 一次性模式（有任务参数）：创建本次运行目录
-    run_dir = runtime.start_run()
+    # 一次性模式（有任务参数）：创建本次运行目录（--run 时复用指定目录）
+    run_dir = runtime.start_run(run_opt)
     console.print(f"[cyan]本次运行目录: {run_dir}[/]")
 
     # ---- 2. 校验编码阶段的前置条件（spec.md 必须存在）----

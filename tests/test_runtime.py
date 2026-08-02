@@ -36,3 +36,19 @@ def test_close_run(monkeypatch, tmp_path):
     runtime.write_transcript("x")
     runtime.close_run()
     assert runtime._transcript is None
+
+
+def test_start_run_reuses_existing(monkeypatch, tmp_path):
+    """start_run(existing) 复用指定目录，不新建、不删除已有 spec/代码。"""
+    existing = tmp_path / "prev_run"
+    existing.mkdir()
+    (existing / "spec.md").write_text("# spec", encoding="utf-8")
+    (existing / "output").mkdir()
+    (existing / "output" / "game.js").write_text("// game", encoding="utf-8")
+    monkeypatch.setattr(runtime, "RUNS_DIR", tmp_path / "runs")
+
+    run_dir = runtime.start_run(existing)
+    assert run_dir == existing
+    assert (existing / "spec.md").is_file()          # 已有文件保留
+    assert (existing / "output" / "game.js").is_file()  # 代码保留
+    assert runtime.current() == existing

@@ -369,11 +369,16 @@ def _clear_outputs() -> None:
     console.print("[yellow]已清空本次运行的代码和 spec.md，可以开始新需求。[/]")
 
 
-def run_interactive_session(safety_mode: str = "auto", stream: bool = True) -> None:
-    """交互会话主循环：持续对话直到用户退出。"""
+def run_interactive_session(safety_mode: str = "auto", stream: bool = True, run_dir: Path | None = None) -> None:
+    """交互会话主循环：持续对话直到用户退出。
+
+    参数:
+        run_dir: 可选，复用指定运行目录（调试 agent 时沿用之前的 spec/代码），
+                 不传则新建 runs/<时间戳>/。
+    """
     interactive.ENABLED = True  # 会话模式始终允许 agent 追问
-    run_dir = runtime.start_run()
-    console.print(f"[cyan]本次运行目录: {run_dir}（产物与 session.log 都在这里）[/]")
+    run_dir_path = runtime.start_run(run_dir)
+    console.print(f"[cyan]本次运行目录: {run_dir_path}（产物与 session.log 都在这里）[/]")
     console.print("[cyan]wz-agent 交互会话。输入需求开始；/help 查看命令；/exit 或 Ctrl-C 退出。[/]")
     _print_help()
 

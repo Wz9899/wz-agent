@@ -24,9 +24,20 @@ _current: Path | None = None
 _transcript: TextIO | None = None
 
 
-def start_run() -> Path:
-    """创建本次运行的独立目录 runs/<时间戳>/，并打开 session.log。"""
+def start_run(existing: Path | None = None) -> Path:
+    """创建本次运行的独立目录 runs/<时间戳>/，或复用指定目录（调试场景）。
+
+    参数:
+        existing: 若指定，直接复用该目录（不新建、不删除已有 spec/output），
+                  session.log 改为追加写入——用于调试 agent 时沿用之前生成的产物。
+    """
     global _current, _transcript
+    if existing is not None:
+        _current = existing
+        _current.mkdir(parents=True, exist_ok=True)
+        (_current / "output").mkdir(exist_ok=True)
+        _transcript = open(_current / "session.log", "a", encoding="utf-8", errors="replace")
+        return _current
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     _current = RUNS_DIR / ts
     _current.mkdir(parents=True, exist_ok=True)

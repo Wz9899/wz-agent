@@ -174,6 +174,14 @@ def test_run_code_no_existing_files(monkeypatch):
     assert "已有的文件" not in captured["task"]
 
 
+def test_session_uses_provided_run_dir(monkeypatch):
+    """传 run_dir 时复用指定目录（调试 agent），不新建运行目录。"""
+    monkeypatch.setattr(interactive, "prompt_human", lambda prompt: "/exit")
+    provided = runtime.RUNS_DIR / "prev_run"
+    session.run_interactive_session(run_dir=provided)
+    assert runtime.current() == provided
+
+
 def test_session_question_dispatches_to_qa(monkeypatch):
     """输入提问 → run_qa，不当作需求澄清。"""
     answers = iter(["数据来源是啥", "/exit"])
