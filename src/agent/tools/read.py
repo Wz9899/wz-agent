@@ -29,6 +29,22 @@ class ReadTool(BaseTool):
     # 类级别常量，便于外部调整
     MAX_CHARS: int = 3000
 
+    @staticmethod
+    def _read_any_encoding(path: str) -> str:
+        """读取文本文件，按 UTF-8 → GBK → 强制替换 顺序容错解码。
+
+        Windows 下 agent 生成/重定向的文件可能是 GBK（而非 UTF-8），
+        多编码尝试保证至少能读到内容；无法解码的字节替换为 �。
+        """
+        for enc in ("utf-8", "gbk"):
+            try:
+                with open(path, "r", encoding=enc) as f:
+                    return f.read()
+            except UnicodeDecodeError:
+                continue
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read()
+
     @property
     def name(self) -> str:
         return "read"
@@ -49,18 +65,15 @@ class ReadTool(BaseTool):
             lines: 可选，行范围。如 "1-50" 读 1-50 行、"40" 读第 40 行；
                    为空时读取文件开头（超长自动截断）。
         """
-        # ---- 1. 尝试以 UTF-8 文本模式读取 ----
+        # ---- 1. 读取文本（多编码容错：UTF-8 → GBK → 强制替换）----
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                content = f.read()
+            content = self._read_any_encoding(path)
         except FileNotFoundError:
             return f"错误：文件不存在 —— {path}"
         except IsADirectoryError:
             return f"错误：{path} 是一个目录，请指定具体文件"
         except PermissionError:
             return f"错误：没有权限读取 {path}"
-        except UnicodeDecodeError:
-            return f"错误：{path} 不是 UTF-8 文本文件，无法读取"
         except OSError as e:
             return f"读取文件时出错（OS 错误）：{e}"
         except Exception as e:

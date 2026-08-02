@@ -48,6 +48,22 @@ def test_read_no_lines_truncates(tmp_path):
     assert "以上为前" in out  # 超长自动截断
 
 
+def test_read_gbk_file(tmp_path):
+    """GBK 编码文件可读（Windows 下 agent 生成/重定向的文件常是 GBK）。"""
+    p = tmp_path / "gbk.txt"
+    p.write_bytes("中文内容".encode("gbk"))
+    out = ReadTool().run(str(p))
+    assert "中文内容" in out  # 用 GBK 解码
+
+
+def test_read_undecodable_bytes_uses_replace(tmp_path):
+    """含非法字节的文件用 errors=replace 读，不报错、能读到部分内容。"""
+    p = tmp_path / "mixed.txt"
+    p.write_bytes(b"abc\xae\xff\xfe def")  # 非 UTF-8/GBK 合法序列
+    out = ReadTool().run(str(p))
+    assert "abc" in out  # 至少读到部分，不抛"不是 UTF-8"错误
+
+
 # ---------- write append 分块 ----------
 
 
