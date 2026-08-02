@@ -299,11 +299,19 @@ def run_code(instruction: str, safety_mode: str, stream: bool) -> None:
 
 
 def _generated_code_files() -> list[Path]:
-    """本次运行 output/ 目录下已生成的 .py 文件（按修改时间倒序）。"""
+    """本次运行 output/ 目录下已生成的文件（代码/页面/资源），按修改时间倒序。
+
+    不只认 .py——前端项目（index.html / style.css / script.js）也是已生成的代码，
+    否则用户无法对这些项目发起修改反馈。
+    """
     out = runtime.output_dir()
     if not out.is_dir():
         return []
-    return sorted(out.glob("*.py"), key=lambda p: p.stat().st_mtime, reverse=True)
+    return sorted(
+        (p for p in out.iterdir() if p.is_file()),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
 
 
 def has_generated_code() -> bool:

@@ -286,6 +286,14 @@ def test_has_generated_code_false(monkeypatch):
     assert session.has_generated_code() is False
 
 
+def test_has_generated_code_frontend_files():
+    """output/ 下只有前端文件（index.html 等，无 .py）也算已有代码。"""
+    out = runtime.output_dir()
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "index.html").write_text("<html></html>", encoding="utf-8")
+    assert session.has_generated_code() is True
+
+
 def test_handle_command_clear_cancel(monkeypatch):
     """/clear 且用户不确认（N）→ 取消，不执行清理。"""
     monkeypatch.setattr(interactive, "prompt_human", lambda prompt: "n")
