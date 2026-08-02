@@ -261,12 +261,25 @@ def run_code(instruction: str, safety_mode: str, stream: bool) -> None:
     spec = ensure_spec()
     out_dir = runtime.output_dir()
     runtime.write_transcript(f"\n===== 编码执行 =====\n{instruction}\n")
+
+    # 注入 output/ 已有文件：让 agent 基于现状增量开发，而非从头重写
+    existing_files = sorted(out_dir.glob("*")) if out_dir.is_dir() else []
+    existing_note = ""
+    if existing_files:
+        names = ", ".join(p.name for p in existing_files)
+        existing_note = (
+            f"\noutput/ 下已有的文件：{names}\n"
+            f"请先 read 了解已有代码，**基于它们增量开发/修改**，不要从头重写、"
+            f"不要重复创建同名文件覆盖已有实现。\n"
+        )
+
     task = (
         f"{instruction}\n\n"
         f"===== spec.md 项目级上下文 =====\n{spec}\n\n"
         f"===== 输出位置 =====\n"
         f"所有生成的代码写入目录（绝对路径，write 会自动创建）：\n{out_dir}\n"
-        f"每个任务生成一个单独的主文件，不要写到别处。"
+        f"每个任务生成一个单独的主文件，不要写到别处。\n"
+        f"{existing_note}"
     )
     console.print("[bold green]编码执行...[/]")
     result = run_interactive(

@@ -9,8 +9,9 @@ from agent import interactive, runtime, session
 
 @pytest.fixture(autouse=True)
 def _isolate_run_dir(tmp_path, monkeypatch):
-    """把 runs/ 重定向到临时目录，避免测试创建真实运行产物。"""
+    """把 runs/ 重定向到临时目录，并重置运行上下文，避免测试相互污染。"""
     monkeypatch.setattr(runtime, "RUNS_DIR", tmp_path)
+    runtime.start_run()  # 重置 _current 指向当前测试的临时目录
 
 
 # ---------- is_code_intent ----------
@@ -115,6 +116,42 @@ def test_session_unrecognized_prompts(monkeypatch):
     session.run_interactive_session()
     assert called == {"clarify": [], "qa": [], "code": [], "modify": []}
     assert any("没理解" in str(x) for x in printed)
+
+
+def test_run_code_injects_existing_files(monkeypatch):
+    """编码时注入 output/ 已有文件，指导 agent 增量开发而非从头重写。"""
+    monkeypatch.setattr(session, "spec_exists", lambda: True)
+    monkeypatch.setattr(session, "ensure_spec", lambda: "# spec")
+    out_dir = runtime.output_dir()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "game.js").write_text("// existing", encoding="utf-8")
+
+    captured = {}
+
+    def fake_run_interactive(sp, um, **kw):
+        captured["task"] = um
+        return "[DONE]"
+
+    monkeypatch.setattr(session, "run_interactive", fake_run_interactive)
+    session.run_code("编码", "auto", True)
+    assert "game.js" in captured["task"]       # 列出已有文件
+    assert "增量开发" in captured["task"]      # 指导增量
+    assert "从头重写" in captured["task"]      # 明确不重写
+
+
+def test_run_code_no_existing_files(monkeypatch):
+    """output/ 为空时不注入"已有文件"提示。"""
+    monkeypatch.setattr(session, "spec_exists", lambda: True)
+    monkeypatch.setattr(session, "ensure_spec", lambda: "# spec")
+    captured = {}
+
+    def fake_run_interactive(sp, um, **kw):
+        captured["task"] = um
+        return "[DONE]"
+
+    monkeypatch.setattr(session, "run_interactive", fake_run_interactive)
+    session.run_code("编码", "auto", True)
+    assert "已有的文件" not in captured["task"]
 
 
 def test_session_question_dispatches_to_qa(monkeypatch):
