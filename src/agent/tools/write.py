@@ -20,16 +20,17 @@ class WriteTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "创建新文件或覆盖已有文件的内容。"
-            "会自动创建不存在的父目录。适合生成代码、配置文件等。"
+            "创建新文件或覆盖已有文件；append=True 时追加到文件末尾（不存在则创建），"
+            "适合大文件分块写入。会自动创建不存在的父目录。"
         )
 
-    def run(self, path: str, content: str) -> str:
-        """将 content 写入 path，自动创建中间目录。
+    def run(self, path: str, content: str, append: bool = False) -> str:
+        """将 content 写入 path；append=True 时追加到末尾（不存在则创建）。
 
         参数:
             path: 目标文件路径（相对或绝对）。
             content: 要写入的文本内容。
+            append: 是否追加（True=追加到文件末尾，False=覆盖）。
         """
         # ---- 1. 路径安全：拒绝写入到已存在的目录 ----
         if os.path.isdir(path):
@@ -45,9 +46,10 @@ class WriteTool(BaseTool):
         except OSError as e:
             return f"创建父目录时出错：{e}"
 
-        # ---- 3. 写入文件 ----
+        # ---- 3. 写入 / 追加 ----
+        mode = "a" if append else "w"
         try:
-            with open(path, "w", encoding="utf-8") as f:
+            with open(path, mode, encoding="utf-8") as f:
                 f.write(content)
         except PermissionError:
             return f"错误：没有权限写入 {path}"
@@ -58,4 +60,5 @@ class WriteTool(BaseTool):
         except Exception as e:
             return f"写入文件时出错：{e}"
 
-        return f"✅ 文件已写入：{path}（{len(content)} 字符）"
+        verb = "追加" if append else "写入"
+        return f"✅ 已{verb}：{path}（{len(content)} 字符）"

@@ -47,6 +47,11 @@ CODE_SYSTEM_PROMPT = """你是一个编码助手，根据 spec.md 中定义的�
 - 每个实现任务生成一个单独的主文件：`output/<英文项目名>.py`
   （如猜数字游戏 → `output/guess_number.py`）。确有辅助文件也统一放 `output/` 下。
 
+### 大文件分块写入
+- 写大文件（如数据量很大的 JS/Python 文件）时：先用 `write` 写骨架，
+  再用 `write(append=True)` 分段追加内容，**避免单次参数过长被截断**。
+- 读大文件时用 `read(path, lines="1-50")` 分段读取，不要一次读整个文件。
+
 ### 4. 验证
 每完成一个模块后运行验证：
 - `python -m pytest` 或 `python 文件.py` 确认能跑
