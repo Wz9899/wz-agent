@@ -21,7 +21,7 @@ from rich.panel import Panel
 from agent import interactive, runtime
 from agent.context import ensure_spec, spec_exists
 from agent.loop import run_interactive
-from agent.prompts import CLARIFY_SYSTEM_PROMPT, CODE_SYSTEM_PROMPT
+from agent.prompts import CLARIFY_SYSTEM_PROMPT, CODE_SYSTEM_PROMPT, MODIFY_SYSTEM_PROMPT
 
 console = Console()
 
@@ -320,7 +320,7 @@ def has_generated_code() -> bool:
 
 
 def run_modify(instruction: str, safety_mode: str, stream: bool) -> None:
-    """根据用户反馈修改现有代码：读 output/ 下代码，用 edit 修改，验证。"""
+    """根据用户反馈精准修改现有代码（用 edit，不重写整个文件）。"""
     files = _generated_code_files()
     if not files:
         console.print("[yellow]还没有已生成的代码 —— 先输入需求澄清 + 编码。[/]")
@@ -330,19 +330,16 @@ def run_modify(instruction: str, safety_mode: str, stream: bool) -> None:
     out_dir = runtime.output_dir()
     spec_ctx = f"\n\n===== spec.md 项目级上下文 =====\n{ensure_spec()}" if spec_exists() else ""
     task = (
-        f"用户输入：{instruction}\n\n"
+        f"用户要求修改：{instruction}\n\n"
         f"output/ 目录下已有的代码文件：\n{file_list}\n"
-        f"请判断用户意图并处理：\n"
-        f"  - 如果是【修改代码】的请求 → 先 read 读取相关文件，理解现状后用 edit 精准修改，"
-        f"修改后运行验证，最后报告改了什么、如何验证。\n"
-        f"  - 如果是【对现有代码的提问/解释请求】→ 直接 read 相关文件并回答，回复以 [DONE] 开头。\n"
-        f"  - 不要创建新文件覆盖现有实现，除非确实需要。\n"
         f"代码目录（绝对路径）：{out_dir}\n"
+        f"请基于这些文件做**精准修改**（用 edit 只改需要改的部分，"
+        f"不要用 write 重写整个文件），详见系统提示。\n"
         f"{spec_ctx}"
     )
     console.print("[bold green]修改代码...[/]")
     result = run_interactive(
-        CODE_SYSTEM_PROMPT,
+        MODIFY_SYSTEM_PROMPT,
         task,
         retry=True,
         max_steps=SESSION_MAX_STEPS,

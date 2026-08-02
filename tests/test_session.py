@@ -139,6 +139,26 @@ def test_run_code_injects_existing_files(monkeypatch):
     assert "从头重写" in captured["task"]      # 明确不重写
 
 
+def test_run_modify_uses_modify_prompt(monkeypatch):
+    """修改反馈用独立的修改 prompt（而非编码 prompt），避免 agent 重写整个文件。"""
+    monkeypatch.setattr(session, "spec_exists", lambda: False)  # 不生成 spec 上下文
+    out = runtime.output_dir()
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "game.js").write_text("// game", encoding="utf-8")
+
+    captured = {}
+
+    def fake_run_interactive(sp, um, **kw):
+        captured["prompt"] = sp
+        captured["task"] = um
+        return "[DONE]"
+
+    monkeypatch.setattr(session, "run_interactive", fake_run_interactive)
+    session.run_modify("把范围改大", "auto", True)
+    assert captured["prompt"] == session.MODIFY_SYSTEM_PROMPT
+    assert "不要用 write 重写整个文件" in captured["task"]
+
+
 def test_run_code_no_existing_files(monkeypatch):
     """output/ 为空时不注入"已有文件"提示。"""
     monkeypatch.setattr(session, "spec_exists", lambda: True)

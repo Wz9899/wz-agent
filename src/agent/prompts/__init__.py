@@ -8,12 +8,14 @@
 
 from agent.prompts.clarify import CLARIFY_SYSTEM_PROMPT
 from agent.prompts.code import CODE_SYSTEM_PROMPT
+from agent.prompts.modify import MODIFY_SYSTEM_PROMPT
 from agent.prompts.triage import TRIAGE_SYSTEM_PROMPT
 from agent.prompts.to_tickets import TO_TICKETS_SYSTEM_PROMPT
 
 __all__ = [
     "CLARIFY_SYSTEM_PROMPT",
     "CODE_SYSTEM_PROMPT",
+    "MODIFY_SYSTEM_PROMPT",
     "TRIAGE_SYSTEM_PROMPT",
     "TO_TICKETS_SYSTEM_PROMPT",
 ]
