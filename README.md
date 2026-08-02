@@ -23,6 +23,22 @@
 - **LLM**: DeepSeek (deepseek-chat, OpenAI 兼容 API)
 - **CLI**: click + rich
 
+## 示例项目：NBA 神秘球员猜猜乐
+
+一个由 **wz-agent 自动生成**的纯前端游戏示例——完整走通了「需求澄清 → 编码执行 → 修改反馈」全流程的产物。
+
+```
+examples/nba-wordle/
+├── index.html   # 完整游戏（内联样式 + 逻辑 + 球员数据，单文件）
+└── spec.md      # 游戏的需求规格（澄清阶段产出）
+```
+
+**玩法**：系统随机选定一名现役 NBA 球员作为"神秘目标"，玩家最多 7 次机会猜球员，每次猜完读取属性对比提示（数值属性：高于/低于/相同；分类属性：匹配/不匹配）缩小范围，猜中获胜，7 次未中揭晓答案。
+
+**运行**：浏览器直接打开 `examples/nba-wordle/index.html` 即可（纯前端，无后端、无网络依赖，球员数据内置）。
+
+**它怎么来的**：`python src/main.py` → 输入需求 → agent 澄清写 spec → 编码生成 → 按你的反馈修改。想生成你自己的项目，见下方[快速开始](#快速开始)。
+
 ## 快速开始
 
 ### 1. 安装依赖
@@ -99,6 +115,7 @@ wz-agent/
 ├── requirements.txt        # Python 依赖
 ├── .env.example            # 环境变量模板（复制为 .env）
 ├── test_api.py             # API 连通性测试
+├── examples/nba-wordle/    # 示例项目：agent 生成的 NBA 猜球员游戏
 ├── runs/                   # 每次运行的工作区：<时间戳>/ 下 spec.md + output/ + session.log
 ├── .scratch/               # 本地 issue tracker（issue-tracker.md 约定）
 │   └── <feature-slug>/
