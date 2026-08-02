@@ -416,7 +416,21 @@ def _run_loop(
 
                 step += 1
                 tool_name = call["function"]["name"]
-                tool_args = json.loads(call["function"]["arguments"])
+                try:
+                    tool_args = json.loads(call["function"]["arguments"])
+                except (json.JSONDecodeError, ValueError) as e:
+                    # LLM 参数非法/截断（写大文件时常见）：不执行工具，
+                    # 把错误返回给 LLM 让它重新生成完整参数，而不是崩溃
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": call["id"],
+                        "content": (
+                            f"[ERR] 工具 '{tool_name}' 的参数不是合法 JSON：{e}。"
+                            f"请重新生成完整、闭合的工具参数。"
+                        ),
+                    })
+                    _maybe_compact(messages)
+                    continue
 
                 # 3b. 流式模式：先展示本次工具调用
                 #     注意用 ASCII 箭头 '->' —— Windows GBK 控制台无法编码 '→'/'↳'

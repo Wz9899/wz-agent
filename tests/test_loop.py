@@ -268,3 +268,37 @@ def test_run_interactive_code_autonomous(monkeypatch):
     out = loop.run_interactive("sp", "um", retry=True)
     assert out == "[DONE] 全部模块完成"
     assert calls["n"] == 1  # 只跑一轮
+
+
+def test_run_loop_handles_invalid_json_args(monkeypatch):
+    """LLM 返回非法 JSON 工具参数（写大文件时被截断）→ 不崩溃，错误返回给 LLM 后继续。"""
+    responses = [
+        _D(choices=[_D(message=_D(role="assistant", content=None, tool_calls=[
+            _D(id="c1", type="function", function=_D(name="read", arguments='{"path": "unclosed')),
+        ]))]),
+        _D(choices=[_D(message=_D(role="assistant", content="任务完成", tool_calls=None))]),
+    ]
+
+    class _FakeCompletions:
+        def __init__(self, resp):
+            self.resp = resp
+            self.i = 0
+        def create(self, **kw):
+            r = self.resp[self.i]
+            self.i += 1
+            return r
+
+    class _FakeClient:
+        def __init__(self, resp):
+            self._c = _FakeCompletions(resp)
+        @property
+        def chat(self):
+            return _D(completions=self._c)
+
+    client = _FakeClient(responses)  # 共享同一个 client，create 按序返回
+    monkeypatch.setattr(loop, "_get_client", lambda: client)
+    msgs = [{"role": "system", "content": "S"}, {"role": "user", "content": "U"}]
+    result = loop._run_loop(msgs, stream=False)
+    assert result == "任务完成"
+    # 错误消息被作为 tool 结果返回给 LLM（agent 未崩溃，LLM 可据此重试）
+    assert any("[ERR] 工具 'read' 的参数不是合法 JSON" in m.get("content", "") for m in msgs)
