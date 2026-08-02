@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NBA 神秘球员猜猜乐</title>
+<style>
+  /* ===== 全局样式 ===== */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+    background: linear-gradient(135deg, #0b1e3a 0%, #1d4e89 100%);
+    color: #eef3f8;
+    min-height: 100vh;
+    padding: 20px 12px 60px;
+  }
+  .wrap { max-width: 780px; margin: 0 auto; }
+
+  h1 {
+    text-align: center;
+    font-size: 26px;
+    letter-spacing: 2px;
+    margin-bottom: 4px;
+  }
+  .subtitle {
+    text-align: center;
+    color: #9fb6cc;
+    font-size: 13px;
+    margin-bottom: 18px;
+  }
+
+  /* ===== 状态栏 ===== */
+  .status-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(255,255,255,.08);
+    border: 1px solid rgba(255,255,255,.15);
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+  }
+  .remaining { font-size: 15px; }
+  .remaining b { color: #ffd166; font-size: 20px; }
+  .guess-hint { font-size: 13px; color: #cfe0f0; }
+
+  /* ===== 输入区 ===== */
+  .input-area { position: relative; margin-bottom: 18px; }
+  .input-row { display: flex; gap: 8px; }
+  .input-row input {
+    flex: 1;
+    padding: 12px 14px;
+    font-size: 16px;
+    border-radius: 8px;
+    border: none;
+    outline: none;
+    background: #f2f6fb;
+    color: #1a2a3a;
+  }
+  .input-row input:focus { box-shadow: 0 0 0 2px #ffd166; }
+  .input-row button {
+    padding: 12px 22px;
+    font-size: 15px;
+    border: none;
+    border-radius: 8px;
+    background: #ffd166;
+    color: #1a2a3a;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .input-row button:hover { background: #ffc93c; }
+
+  /* ===== 下拉候选列表（独立浮层，正确 z 轴，不遮挡下方结果区内容） ===== */
+  .dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 1000;   /* 独立浮层，位于输入框之下、内容之上 */
+    background: #f6f9fc;
+    border: 1px solid #b9cce0;
+    border-radius: 8px;
+    max-height: 240px;
+    overflow-y: auto;
+    box-shadow: 0 6px 18px rgba(0,0,0,.35);
+  }
+  .dropdown.hidden { display: none; }
+  .dropdown .opt {
+    padding: 10px 14px;
+    color: #1a2a3a;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .dropdown .opt:hover, .dropdown .opt.active { background: #dbe9f7; }
+  .dropdown .opt .en { color: #7a8a9a; font-size: 12px; margin-left: 8px; }
+  .dropdown .opt.guessed { color: #b03a3a; }
+  .dropdown .opt.guessed .tag { color: #b03a3a; font-size: 12px; font-weight: 700; margin-left: auto; }
+  .dropdown .empty { padding: 12px 14px; color: #7a8a9a; }
+
+  /* ===== 消息提示 ===== */
+  .msg { margin-bottom: 12px; font-size: 14px; min-height: 20px; }
+  .msg.error { color: #ff8a8a; }
+  .msg.info { color: #a5d6ff; }
+  .msg.success { color: #7dffb0; }
+
+  /* ===== 猜测结果表 ===== */
+  .result-section h2 { font-size: 16px; margin: 14px 0 8px; color: #d8e6f5; }
+  table.results {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    background: rgba(255,255,255,.06);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  table.results th, table.results td {
+    border: 1px solid rgba(255,255,255,.12);
+    padding: 8px 6px;
+    text-align: center;
+  }
+  table.results th { background: rgba(255,255,255,.1); font-weight: 600; }
+  table.results td.name { text-align: left; white-space: nowrap; }
+  .ok { color: #59e08a; font-weight: 700; }
+  .no { color: #ff7a7a; font-weight: 700; }
+  .up { color: #ffd166; }
+  .down { color: #7ec8ff; }
+  .equal { color: #59e08a; }
+  /* 猜中的那一行高亮 */
+  tr.guessed-row { background: rgba(125,255,176,.12); }
+
+  /* ===== 结果 / 再来一局 ===== */
+  .reveal {
+    margin-top: 16px;
+    padding: 16px;
+    background: rgba(255,255,255,.1);
+    border: 1px solid rgba(255,255,255,.2);
+    border-radius: 10px;
+    text-align: center;
+  }
+  .reveal h2 { margin-bottom: 6px; }
+  .reveal .star-name { font-size: 26px; color: #ffd166; font-weight: 700; }
+  .reveal .star-team { color: #cfe0f0; margin: 4px 0 12px; }
+  .btn-new {
+    padding: 12px 30px;
+    font-size: 16px;
+    font-weight: 700;
+    border: none;
+    border-radius: 8px;
+    background: #ffd166;
+    color: #1a2a3a;
+    cursor: pointer;
+  }
+  .btn-new:hover { background: #ffc93c; }
+
+  .footer { text-align: center; color: #7a8a9a; font-size: 12px; margin-top: 24px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🏀 神秘球员猜猜乐</h1>
+  <div class="subtitle">在 7 次机会内，猜出系统选中的神秘 NBA 球员</div>
+
+  <div class="status-bar">
+    <div class="remaining">剩余次数：<b id="remainingNum">7</b> 次</div>
+    <div class="guess-hint">已尝试 <span id="guessCount">0</span> 次</div>
+  </div>
+
+  <div class="input-area">
+    <div class="input-row">
+      <input type="text" id="searchInput" placeholder="输入球员名（中文或英文）" autocomplete="off">
+      <button id="submitBtn">提交</button>
+    </div>
+    <div class="dropdown hidden" id="dropdown"></div>
+  </div>
+
+  <div class="msg" id="msg"></div>
+
+  <div class="result-section">
+    <h2>猜测历史</h2>
+    <table class="results" id="resultTable">
+      <thead>
+        <tr>
+          <th>球员</th>
+          <th>球队</th>
+          <th>位置</th>
+          <th>国籍</th>
+          <th>年龄</th>
+          <th>NBA年限</th>
+          <th>季后赛</th>
+          <th>冠军</th>
+        </tr>
+      </thead>
+      <tbody id="resultBody"></tbody>
+    </table>
+  </div>
+
+  <div id="revealArea" class="reveal" style="display:none;"></div>
+
+  <div class="footer">内置球员数据 基于虎扑当前赛季现役主力 · 纯前端离线运行</div>
+</div>
+
+<script>
+// 内置现役 NBA 主力球员数据（来源：基于虎扑当前赛季现役主力，开发者内置硬编码）
+const PLAYERS = [
+  {id: 1, nameZh: '勒布朗·詹姆斯', nameEn: 'LeBron James', team: '洛杉矶湖人', position: '小前锋', age: 39, nation: '美国', nbaYears: 21, playoffs: 17, championships: 4},
+  {id: 2, nameZh: '安东尼·戴维斯', nameEn: 'Anthony Davis', team: '洛杉矶湖人', position: '大前锋', age: 31, nation: '美国', nbaYears: 12, playoffs: 10, championships: 1},
+  {id: 3, nameZh: '德安杰洛·拉塞尔', nameEn: 'D\'Angelo Russell', team: '洛杉矶湖人', position: '控球后卫', age: 28, nation: '美国', nbaYears: 9, playoffs: 5, championships: 0},
+  {id: 4, nameZh: '奥斯汀·里夫斯', nameEn: 'Austin Reaves', team: '洛杉矶湖人', position: '得分后卫', age: 26, nation: '美国', nbaYears: 3, playoffs: 2, championships: 0},
+  {id: 5, nameZh: '八村垒', nameEn: 'Rui Hachimura', team: '洛杉矶湖人', position: '大前锋', age: 26, nation: '日本', nbaYears: 5, playoffs: 3, championships: 0},
+  {id: 6, nameZh: '贾克森·海耶斯', nameEn: 'Jaxson Hayes', team: '洛杉矶湖人', position: '中锋', age: 24, nation: '美国', nbaYears: 4, playoffs: 2, championships: 0},
+  {id: 7, nameZh: '加布·文森特', nameEn: 'Gabe Vincent', team: '洛杉矶湖人', position: '控球后卫', age: 28, nation: '尼日利亚', nbaYears: 5, playoffs: 4, championships: 0},
+  {id: 8, nameZh: '卡姆·雷迪什', nameEn: 'Cam Reddish', team: '洛杉矶湖人', position: '小前锋', age: 24, nation: '美国', nbaYears: 5, playoffs: 2, championships: 0},
+  {id: 9, nameZh: '贾里德·范德比尔特', nameEn: 'Jarred Vanderbilt', team: '洛杉矶湖人', position: '前锋', age: 25, nation: '美国', nbaYears: 6, playoffs: 3, championships: 0},
+  {id: 10, nameZh: '马克斯·克里斯蒂', nameEn: 'Max Christie', team: '洛杉矶湖人', position: '得分后卫', age: 21, nation: '美国', nbaYears: 2, playoffs: 1, championships: 0},
+  {id: 11, nameZh: '斯潘塞·丁威迪', nameEn: 'Spencer Dinwiddie', team: '洛杉矶湖人', position: '控球后卫', age: 31, nation: '美国', nbaYears: 10, playoffs: 4, championships: 0},
+  {id: 12, nameZh: '克里斯蒂安·伍德', nameEn: 'Christian Wood', team: '洛杉矶湖人', position: '中锋', age: 28, nation: '美国', nbaYears: 8, playoffs: 1, championships: 0},
+  {id: 13, nameZh: '斯蒂芬·库里', nameEn: 'Stephen Curry', team: '金州勇士', position: '控球后卫', age: 36, nation: '美国', nbaYears: 15, playoffs: 14, championships: 4},
+  {id: 14, nameZh: '克莱·汤普森', nameEn: 'Klay Thompson', team: '金州勇士', position: '得分后卫', age: 34, nation: '美国', nbaYears: 13, playoffs: 12, championships: 4},
+  {id: 15, nameZh: '德雷蒙德·格林', nameEn: 'Draymond Green', team: '金州勇士', position: '大前锋', age: 34, nation: '美国', nbaYears: 12, playoffs: 12, championships: 4},
+  {id: 16, nameZh: '克里斯·保罗', nameEn: 'Chris Paul', team: '金州勇士', position: '控球后卫', age: 39, nation: '美国', nbaYears: 19, playoffs: 15, championships: 0},
+  {id: 17, nameZh: '安德鲁·维金斯', nameEn: 'Andrew Wiggins', team: '金州勇士', position: '小前锋', age: 29, nation: '加拿大', nbaYears: 10, playoffs: 5, championships: 1},
+  {id: 18, nameZh: '乔纳森·库明加', nameEn: 'Jonathan Kuminga', team: '金州勇士', position: '大前锋', age: 21, nation: '刚果', nbaYears: 3, playoffs: 3, championships: 1},
+  {id: 19, nameZh: '摩西·穆迪', nameEn: 'Moses Moody', team: '金州勇士', position: '得分后卫', age: 22, nation: '美国', nbaYears: 3, playoffs: 3, championships: 1},
+  {id: 20, nameZh: '布兰丁·波杰姆斯基', nameEn: 'Brandin Podziemski', team: '金州勇士', position: '得分后卫', age: 21, nation: '美国', nbaYears: 1, playoffs: 1, championships: 0},
+  {id: 21, nameZh: '凯文·卢尼', nameEn: 'Kevon Looney', team: '金州勇士', position: '中锋', age: 28, nation: '美国', nbaYears: 9, playoffs: 8, championships: 3},
+  {id: 22, nameZh: '特雷斯·杰克逊-戴维斯', nameEn: 'Trayce Jackson-Davis', team: '金州勇士', position: '中锋', age: 24, nation: '美国', nbaYears: 1, playoffs: 1, championships: 0},
+  {id: 23, nameZh: '加里·佩顿二世', nameEn: 'Gary Payton II', team: '金州勇士', position: '控球后卫', age: 31, nation: '美国', nbaYears: 6, playoffs: 4, championships: 1},
+  {id: 24, nameZh: '达里奥·沙里奇', nameEn: 'Dario Saric', team: '金州勇士', position: '大前锋', age: 30, nation: '克罗地亚', nbaYears: 8, playoffs: 2, championships: 0},
+  {id: 25, nameZh: '杰森·塔图姆', nameEn: 'Jayson Tatum', team: '波士顿凯尔特人', position: '小前锋', age: 26, nation: '美国', nbaYears: 7, playoffs: 7, championships: 0},
+  {id: 26, nameZh: '杰伦·布朗', nameEn: 'Jaylen Brown', team: '波士顿凯尔特人', position: '得分后卫', age: 27, nation: '美国', nbaYears: 8, playoffs: 8, championships: 0},
+  {id: 27, nameZh: '克里斯塔普斯·波尔津吉斯', nameEn: 'Kristaps Porzingis', team: '波士顿凯尔特人', position: '中锋', age: 28, nation: '拉脱维亚', nbaYears: 8, playoffs: 5, championships: 0},
+  {id: 28, nameZh: '朱·霍勒迪', nameEn: 'Jrue Holiday', team: '波士顿凯尔特人', position: '控球后卫', age: 34, nation: '美国', nbaYears: 15, playoffs: 12, championships: 1},
+  {id: 29, nameZh: '德里克·怀特', nameEn: 'Derrick White', team: '波士顿凯尔特人', position: '得分后卫', age: 29, nation: '美国', nbaYears: 7, playoffs: 5, championships: 0},
+  {id: 30, nameZh: '艾尔·霍福德', nameEn: 'Al Horford', team: '波士顿凯尔特人', position: '中锋', age: 38, nation: '多米尼加', nbaYears: 17, playoffs: 15, championships: 0},
+  {id: 31, nameZh: '萨姆·豪瑟', nameEn: 'Sam Hauser', team: '波士顿凯尔特人', position: '小前锋', age: 26, nation: '美国', nbaYears: 3, playoffs: 3, championships: 0},
+  {id: 32, nameZh: '佩顿·普里查德', nameEn: 'Payton Pritchard', team: '波士顿凯尔特人', position: '控球后卫', age: 26, nation: '美国', nbaYears: 4, playoffs: 4, championships: 0},
+  {id: 33, nameZh: '卢克·科内特', nameEn: 'Luke Kornet', team: '波士顿凯尔特人', position: '中锋', age: 28, nation: '美国', nbaYears: 7, playoffs: 3, championships: 0},
+  {id: 34, nameZh: '泽维尔·蒂尔曼', nameEn: 'Xavier Tillman', team: '波士顿凯尔特人', position: '大前锋', age: 25, nation: '美国', nbaYears: 4, playoffs: 4, championships: 0},
+  {id: 35, nameZh: '奥谢·布里塞特', nameEn: 'Oshae Brissett', team: '波士顿凯尔特人', position: '前锋', age: 26, nation: '加拿大', nbaYears: 5, playoffs: 1, championships: 0},
+  {id: 36, nameZh: '尼古拉·约基奇', nameEn: 'Nikola Jokic', team: '丹佛掘金', position: '中锋', age: 29, nation: '塞尔维亚', nbaYears: 9, playoffs: 7, championships: 1},
+  {id: 37, nameZh: '贾马尔·穆雷', nameEn: 'Jamal Murray', team: '丹佛掘金', position: '控球后卫', age: 27, nation: '加拿大', nbaYears: 8, playoffs: 7, championships: 1},
+  {id: 38, nameZh: '迈克尔·波特', nameEn: 'Michael Porter Jr.', team: '丹佛掘金', position: '小前锋', age: 26, nation: '美国', nbaYears: 5, playoffs: 5, championships: 1},
+  {id: 39, nameZh: '阿隆·戈登', nameEn: 'Aaron Gordon', team: '丹佛掘金', position: '大前锋', age: 28, nation: '美国', nbaYears: 10, playoffs: 6, championships: 1},
+  {id: 40, nameZh: '肯塔维奥斯·考德威尔-波普', nameEn: 'Kentavious Caldwell-Pope', team: '丹佛掘金', position: '得分后卫', age: 31, nation: '美国', nbaYears: 11, playoffs: 10, championships: 1},
+  {id: 41, nameZh: '雷吉·杰克逊', nameEn: 'Reggie Jackson', team: '丹佛掘金', position: '控球后卫', age: 34, nation: '美国', nbaYears: 13, playoffs: 11, championships: 0},
+  {id: 42, nameZh: '克里斯蒂安·布劳恩', nameEn: 'Christian Braun', team: '丹佛掘金', position: '得分后卫', age: 23, nation: '美国', nbaYears: 2, playoffs: 2, championships: 1},
+  {id: 43, nameZh: '佩顿·沃特森', nameEn: 'Peyton Watson', team: '丹佛掘金', position: '小前锋', age: 21, nation: '美国', nbaYears: 2, playoffs: 2, championships: 1},
+  {id: 44, nameZh: '齐克·纳吉', nameEn: 'Zeke Nnaji', team: '丹佛掘金', position: '中锋', age: 23, nation: '美国', nbaYears: 4, playoffs: 3, championships: 1},
+  {id: 45, nameZh: '贾斯汀·霍勒迪', nameEn: 'Justin Holiday', team: '丹佛掘金', position: '小前锋', age: 35, nation: '美国', nbaYears: 11, playoffs: 6, championships: 0},
+  {id: 46, nameZh: '扬尼斯·阿德托昆博', nameEn: 'Giannis Antetokounmpo', team: '密尔沃基雄鹿', position: '大前锋', age: 29, nation: '希腊', nbaYears: 11, playoffs: 10, championships: 1},
+  {id: 47, nameZh: '达米安·利拉德', nameEn: 'Damian Lillard', team: '密尔沃基雄鹿', position: '控球后卫', age: 33, nation: '美国', nbaYears: 12, playoffs: 9, championships: 0},
+  {id: 48, nameZh: '克里斯·米德尔顿', nameEn: 'Khris Middleton', team: '密尔沃基雄鹿', position: '小前锋', age: 32, nation: '美国', nbaYears: 12, playoffs: 9, championships: 1},
+  {id: 49, nameZh: '布鲁克·洛佩兹', nameEn: 'Brook Lopez', team: '密尔沃基雄鹿', position: '中锋', age: 36, nation: '美国', nbaYears: 16, playoffs: 11, championships: 1},
+  {id: 50, nameZh: '鲍比·波蒂斯', nameEn: 'Bobby Portis', team: '密尔沃基雄鹿', position: '大前锋', age: 29, nation: '美国', nbaYears: 9, playoffs: 7, championships: 1},
+  {id: 51, nameZh: '马利克·比斯利', nameEn: 'Malik Beasley', team: '密尔沃基雄鹿', position: '得分后卫', age: 27, nation: '美国', nbaYears: 8, playoffs: 3, championships: 0},
+  {id: 52, nameZh: '帕特·康诺顿', nameEn: 'Pat Connaughton', team: '密尔沃基雄鹿', position: '得分后卫', age: 31, nation: '美国', nbaYears: 9, playoffs: 7, championships: 1},
+  {id: 53, nameZh: 'AJ·格林', nameEn: 'A.J. Green', team: '密尔沃基雄鹿', position: '得分后卫', age: 24, nation: '美国', nbaYears: 2, playoffs: 2, championships: 0},
+  {id: 54, nameZh: '马乔恩·博尚', nameEn: 'MarJon Beauchamp', team: '密尔沃基雄鹿', position: '小前锋', age: 23, nation: '美国', nbaYears: 2, playoffs: 2, championships: 0},
+  {id: 55, nameZh: '安德烈·杰克逊', nameEn: 'Andre Jackson Jr.', team: '密尔沃基雄鹿', position: '得分后卫', age: 22, nation: '美国', nbaYears: 1, playoffs: 1, championships: 0},
+  {id: 56, nameZh: '乔尔·恩比德', nameEn: 'Joel Embiid', team: '费城76人', position: '中锋', age: 30, nation: '喀麦隆', nbaYears: 8, playoffs: 7, championships: 0},
+  {id: 57, nameZh: '泰瑞斯·马克西', nameEn: 'Tyrese Maxey', team: '费城76人', position: '控球后卫', age: 23, nation: '美国', nbaYears: 4, playoffs: 4, championships: 0},
+  {id: 58, nameZh: '托拜厄斯·哈里斯', nameEn: 'Tobias Harris', team: '费城76人', position: '大前锋', age: 31, nation: '美国', nbaYears: 13, playoffs: 9, championships: 0},
+  {id: 59, nameZh: '巴迪·希尔德', nameEn: 'Buddy Hield', team: '费城76人', position: '得分后卫', age: 31, nation: '巴哈马', nbaYears: 8, playoffs: 5, championships: 0},
+  {id: 60, nameZh: '凯利·乌布雷', nameEn: 'Kelly Oubre Jr.', team: '费城76人', position: '小前锋', age: 28, nation: '美国', nbaYears: 9, playoffs: 5, championships: 0},
+  {id: 61, nameZh: '尼古拉斯·巴图姆', nameEn: 'Nicolas Batum', team: '费城76人', position: '小前锋', age: 35, nation: '法国', nbaYears: 16, playoffs: 14, championships: 0},
+  {id: 62, nameZh: '凯尔·洛瑞', nameEn: 'Kyle Lowry', team: '费城76人', position: '控球后卫', age: 38, nation: '美国', nbaYears: 18, playoffs: 13, championships: 1},
+  {id: 63, nameZh: '保罗·里德', nameEn: 'Paul Reed', team: '费城76人', position: '中锋', age: 25, nation: '美国', nbaYears: 4, playoffs: 3, championships: 0},
+  {id: 64, nameZh: '德安东尼·梅尔顿', nameEn: 'De\'Anthony Melton', team: '费城76人', position: '得分后卫', age: 26, nation: '美国', nbaYears: 6, playoffs: 4, championships: 0},
+  {id: 65, nameZh: '小肯扬·马丁', nameEn: 'Kenyon Martin Jr.', team: '费城76人', position: '前锋', age: 23, nation: '美国', nbaYears: 4, playoffs: 2, championships: 0},
+  {id: 66, nameZh: '杰伦·布伦森', nameEn: 'Jalen Brunson', team: '纽约尼克斯', position: '控球后卫', age: 27, nation: '美国', nbaYears: 6, playoffs: 5, championships: 0},
+  {id: 67, nameZh: '朱利叶斯·兰德尔', nameEn: 'Julius Randle', team: '纽约尼克斯', position: '大前锋', age: 29, nation: '美国', nbaYears: 10, playoffs: 5, championships: 0},
+  {id: 68, nameZh: 'OG·阿努诺比', nameEn: 'OG Anunoby', team: '纽约尼克斯', position: '小前锋', age: 26, nation: '英国', nbaYears: 7, playoffs: 4, championships: 1},
+  {id: 69, nameZh: '约什·哈特', nameEn: 'Josh Hart', team: '纽约尼克斯', position: '得分后卫', age: 29, nation: '美国', nbaYears: 7, playoffs: 4, championships: 1},
+  {id: 70, nameZh: '唐特·迪文琴佐', nameEn: 'Donte DiVincenzo', team: '纽约尼克斯', position: '得分后卫', age: 27, nation: '美国', nbaYears: 6, playoffs: 5, championships: 1},
+  {id: 71, nameZh: '米切尔·罗宾逊', nameEn: 'Mitchell Robinson', team: '纽约尼克斯', position: '中锋', age: 26, nation: '美国', nbaYears: 6, playoffs: 5, championships: 0},
+  {id: 72, nameZh: '伊赛亚·哈尔滕施泰因', nameEn: 'Isaiah Hartenstein', team: '纽约尼克斯', position: '中锋', age: 26, nation: '德国', nbaYears: 6, playoffs: 4, championships: 0},
+  {id: 73, nameZh: '普雷舍斯·阿丘瓦', nameEn: 'Precious Achiuwa', team: '纽约尼克斯', position: '前锋', age: 24, nation: '尼日利亚', nbaYears: 4, playoffs: 3, championships: 0},
+  {id: 74, nameZh: '迈尔斯·麦克布莱德', nameEn: 'Miles McBride', team: '纽约尼克斯', position: '控球后卫', age: 23, nation: '美国', nbaYears: 3, playoffs: 3, championships: 0},
+  {id: 75, nameZh: '博扬·博格达诺维奇', nameEn: 'Bojan Bogdanovic', team: '纽约尼克斯', position: '小前锋', age: 37, nation: '克罗地亚', nbaYears: 10, playoffs: 5, championships: 0},
+  {id: 76, nameZh: '多诺万·米切尔', nameEn: 'Donovan Mitchell', team: '克利夫兰骑士', position: '得分后卫', age: 27, nation: '美国', nbaYears: 7, playoffs: 8, championships: 0},
+  {id: 77, nameZh: '达里厄斯·加兰', nameEn: 'Darius Garland', team: '克利夫兰骑士', position: '控球后卫', age: 24, nation: '美国', nbaYears: 5, playoffs: 3, championships: 0},
+  {id: 78, nameZh: '埃文·莫布利', nameEn: 'Evan Mobley', team: '克利夫兰骑士', position: '大前锋', age: 23, nation: '美国', nbaYears: 3, playoffs: 3, championships: 0},
+  {id: 79, nameZh: '贾勒特·阿伦', nameEn: 'Jarrett Allen', team: '克利夫兰骑士', position: '中锋', age: 26, nation: '美国', nbaYears: 7, playoffs: 6, championships: 0},
+  {id: 80, nameZh: '马克斯·斯特鲁斯', nameEn: 'Max Strus', team: '克利夫兰骑士', position: '得分后卫', age: 28, nation: '美国', nbaYears: 5, playoffs: 4, championships: 0},
+  {id: 81, nameZh: '乔治斯·尼昂', nameEn: 'Georges Niang', team: '克利夫兰骑士', position: '前锋', age: 31, nation: '美国', nbaYears: 8, playoffs: 6, championships: 0},
+  {id: 82, nameZh: '卡里斯·勒韦尔', nameEn: 'Caris LeVert', team: '克利夫兰骑士', position: '得分后卫', age: 29, nation: '美国', nbaYears: 8, playoffs: 3, championships: 0},
+  {id: 83, nameZh: '艾萨克·奥科罗', nameEn: 'Isaac Okoro', team: '克利夫兰骑士', position: '小前锋', age: 23, nation: '美国', nbaYears: 4, playoffs: 2, championships: 0},
+  {id: 84, nameZh: '萨姆·梅里尔', nameEn: 'Sam Merrill', team: '克利夫兰骑士', position: '得分后卫', age: 28, nation: '美国', nbaYears: 4, playoffs: 2, championships: 0},
+  {id: 85, nameZh: '特里斯坦·汤普森', nameEn: 'Tristan Thompson', team: '克利夫兰骑士', position: '中锋', age: 33, nation: '美国', nbaYears: 13, playoffs: 12, championships: 1},
+  {id: 86, nameZh: '吉米·巴特勒', nameEn: 'Jimmy Butler', team: '迈阿密热火', position: '小前锋', age: 34, nation: '美国', nbaYears: 13, playoffs: 10, championships: 0},
+  {id: 87, nameZh: '巴姆·阿德巴约', nameEn: 'Bam Adebayo', team: '迈阿密热火', position: '中锋', age: 26, nation: '美国', nbaYears: 7, playoffs: 6, championships: 0},
+  {id: 88, nameZh: '泰勒·希罗', nameEn: 'Tyler Herro', team: '迈阿密热火', position: '得分后卫', age: 24, nation: '美国', nbaYears: 5, playoffs: 4, championships: 0},
+  {id: 89, nameZh: '特里·罗齐尔', nameEn: 'Terry Rozier', team: '迈阿密热火', position: '控球后卫', age: 30, nation: '美国', nbaYears: 9, playoffs: 5, championships: 0},
+  {id: 90, nameZh: '邓肯·罗宾逊', nameEn: 'Duncan Robinson', team: '迈阿密热火', position: '小前锋', age: 30, nation: '美国', nbaYears: 6, playoffs: 6, championships: 0},
+  {id: 91, nameZh: '凯文·乐福', nameEn: 'Kevin Love', team: '迈阿密热火', position: '大前锋', age: 35, nation: '美国', nbaYears: 16, playoffs: 11, championships: 1},
+  {id: 92, nameZh: '凯莱布·马丁', nameEn: 'Caleb Martin', team: '迈阿密热火', position: '小前锋', age: 28, nation: '美国', nbaYears: 5, playoffs: 5, championships: 0},
+  {id: 93, nameZh: '小海梅·哈克斯', nameEn: 'Jaime Jaquez Jr.', team: '迈阿密热火', position: '小前锋', age: 23, nation: '墨西哥', nbaYears: 1, playoffs: 1, championships: 0},
+  {id: 94, nameZh: '尼科拉·约维奇', nameEn: 'Nikola Jovic', team: '迈阿密热火', position: '大前锋', age: 21, nation: '塞尔维亚', nbaYears: 2, playoffs: 1, championships: 0},
+  {id: 95, nameZh: '约什·理查德森', nameEn: 'Josh Richardson', team: '迈阿密热火', position: '得分后卫', age: 30, nation: '美国', nbaYears: 9, playoffs: 5, championships: 0},
+  {id: 96, nameZh: '凯文·杜兰特', nameEn: 'Kevin Durant', team: '菲尼克斯太阳', position: '大前锋', age: 35, nation: '美国', nbaYears: 17, playoffs: 15, championships: 2},
+  {id: 97, nameZh: '德文·布克', nameEn: 'Devin Booker', team: '菲尼克斯太阳', position: '得分后卫', age: 27, nation: '美国', nbaYears: 9, playoffs: 5, championships: 0},
+  {id: 98, nameZh: '布拉德利·比尔', nameEn: 'Bradley Beal', team: '菲尼克斯太阳', position: '得分后卫', age: 31, nation: '美国', nbaYears: 12, playoffs: 4, championships: 0},
+  {id: 99, nameZh: '格雷森·阿伦', nameEn: 'Grayson Allen', team: '菲尼克斯太阳', position: '得分后卫', age: 28, nation: '美国', nbaYears: 6, playoffs: 3, championships: 0},
+  {id: 100, nameZh: '尤素夫·努尔基奇', nameEn: 'Jusuf Nurkic', team: '菲尼克斯太阳', position: '中锋', age: 29, nation: '波黑', nbaYears: 10, playoffs: 5, championships: 0},
+  {id: 101, nameZh: '埃里克·戈登', nameEn: 'Eric Gordon', team: '菲尼克斯太阳', position: '得分后卫', age: 35, nation: '美国', nbaYears: 16, playoffs: 14, championships: 0},
+  {id: 102, nameZh: '罗伊斯·奥尼尔', nameEn: 'Royce O\'Neale', team: '菲尼克斯太阳', position: '前锋', age: 30, nation: '美国', nbaYears: 7, playoffs: 4, championships: 0},
+  {id: 103, nameZh: '德鲁·尤班克斯', nameEn: 'Drew Eubanks', team: '菲尼克斯太阳', position: '中锋', age: 27, nation: '美国', nbaYears: 6, playoffs: 2, championships: 0},
+  {id: 104, nameZh: '波尔·波尔', nameEn: 'Bol Bol', team: '菲尼克斯太阳', position: '中锋', age: 24, nation: '苏丹', nbaYears: 5, playoffs: 1, championships: 0},
+  {id: 105, nameZh: '纳西尔·利特尔', nameEn: 'Nassir Little', team: '菲尼克斯太阳', position: '前锋', age: 24, nation: '美国', nbaYears: 5, playoffs: 2, championships: 0},
+  {id: 106, nameZh: '卢卡·东契奇', nameEn: 'Luka Doncic', team: '达拉斯独行侠', position: '控球后卫', age: 25, nation: '斯洛文尼亚', nbaYears: 6, playoffs: 4, championships: 0},
+  {id: 107, nameZh: '凯里·欧文', nameEn: 'Kyrie Irving', team: '达拉斯独行侠', position: '控球后卫', age: 32, nation: '美国', nbaYears: 13, playoffs: 10, championships: 1},
+  {id: 108, nameZh: 'PJ·华盛顿', nameEn: 'P.J. Washington', team: '达拉斯独行侠', position: '大前锋', age: 25, nation: '美国', nbaYears: 5, playoffs: 3, championships: 0},
+  {id: 109, nameZh: '丹尼尔·加福德', nameEn: 'Daniel Gafford', team: '达拉斯独行侠', position: '中锋', age: 25, nation: '美国', nbaYears: 5, playoffs: 4, championships: 0},
+  {id: 110, nameZh: '德里克·莱夫利二世', nameEn: 'Dereck Lively II', team: '达拉斯独行侠', position: '中锋', age: 20, nation: '美国', nbaYears: 1, playoffs: 1, championships: 0},
+  {id: 111, nameZh: '小蒂姆·哈达威', nameEn: 'Tim Hardaway Jr.', team: '达拉斯独行侠', position: '得分后卫', age: 32, nation: '美国', nbaYears: 11, playoffs: 7, championships: 0},
+  {id: 112, nameZh: '丹特·艾克萨姆', nameEn: 'Dante Exum', team: '达拉斯独行侠', position: '控球后卫', age: 28, nation: '澳大利亚', nbaYears: 7, playoffs: 2, championships: 0},
+  {id: 113, nameZh: '杰登·哈迪', nameEn: 'Jaden Hardy', team: '达拉斯独行侠', position: '得分后卫', age: 21, nation: '美国', nbaYears: 2, playoffs: 2, championships: 0},
+  {id: 114, nameZh: '马克西·克勒贝尔', nameEn: 'Maxi Kleber', team: '达拉斯独行侠', position: '大前锋', age: 32, nation: '德国', nbaYears: 7, playoffs: 5, championships: 0},
+  {id: 115, nameZh: '约什·格林', nameEn: 'Josh Green', team: '达拉斯独行侠', position: '得分后卫', age: 23, nation: '澳大利亚', nbaYears: 4, playoffs: 3, championships: 0},
+  {id: 116, nameZh: '谢伊·吉尔杰斯-亚历山大', nameEn: 'Shai Gilgeous-Alexander', team: '俄克拉荷马雷霆', position: '控球后卫', age: 25, nation: '加拿大', nbaYears: 6, playoffs: 4, championships: 0},
+  {id: 117, nameZh: '杰伦·威廉姆斯', nameEn: 'Jalen Williams', team: '俄克拉荷马雷霆', position: '得分后卫', age: 23, nation: '美国', nbaYears: 2, playoffs: 2, championships: 0},
+  {id: 118, nameZh: '切特·霍姆格伦', nameEn: 'Chet Holmgren', team: '俄克拉荷马雷霆', position: '中锋', age: 22, nation: '美国', nbaYears: 1, playoffs: 1, championships: 0},
+  {id: 119, nameZh: '约什·吉迪', nameEn: 'Josh Giddey', team: '俄克拉荷马雷霆', position: '控球后卫', age: 21, nation: '澳大利亚', nbaYears: 3, playoffs: 2, championships: 0},
+  {id: 120, nameZh: '吕冈茨·多尔特', nameEn: 'Luguentz Dort', team: '俄克拉荷马雷霆', position: '得分后卫', age: 25, nation: '加拿大', nbaYears: 5, playoffs: 4, championships: 0},
+  {id: 121, nameZh: '以赛亚·乔', nameEn: 'Isaiah Joe', team: '俄克拉荷马雷霆', position: '得分后卫', age: 24, nation: '美国', nbaYears: 4, playoffs: 3, championships: 0},
+  {id: 122, nameZh: '凯森·华莱士', nameEn: 'Cason Wallace', team: '俄克拉荷马雷霆', position: '得分后卫', age: 20, nation: '美国', nbaYears: 1, playoffs: 1, championships: 0},
+  {id: 123, nameZh: '阿隆·维金斯', nameEn: 'Aaron Wiggins', team: '俄克拉荷马雷霆', position: '得分后卫', age: 25, nation: '美国', nbaYears: 3, playoffs: 2, championships: 0},
+  {id: 124, nameZh: '杰林·威廉姆斯', nameEn: 'Jaylin Williams', team: '俄克拉荷马雷霆', position: '中锋', age: 22, nation: '美国', nbaYears: 2, playoffs: 2, championships: 0},
+  {id: 125, nameZh: '肯里奇·威廉姆斯', nameEn: 'Kenrich Williams', team: '俄克拉荷马雷霆', position: '前锋', age: 29, nation: '美国', nbaYears: 6, playoffs: 3, championships: 0},
+  {id: 126, nameZh: '安东尼·爱德华兹', nameEn: 'Anthony Edwards', team: '明尼苏达森林狼', position: '得分后卫', age: 22, nation: '美国', nbaYears: 4, playoffs: 4, championships: 0},
+  {id: 127, nameZh: '卡尔-安东尼·唐斯', nameEn: 'Karl-Anthony Towns', team: '明尼苏达森林狼', position: '中锋', age: 28, nation: '多米尼加', nbaYears: 9, playoffs: 6, championships: 0},
+  {id: 128, nameZh: '鲁迪·戈贝尔', nameEn: 'Rudy Gobert', team: '明尼苏达森林狼', position: '中锋', age: 31, nation: '法国', nbaYears: 11, playoffs: 8, championships: 0},
+  {id: 129, nameZh: '迈克·康利', nameEn: 'Mike Conley', team: '明尼苏达森林狼', position: '控球后卫', age: 36, nation: '美国', nbaYears: 17, playoffs: 13, championships: 0},
+  {id: 130, nameZh: '杰登·麦克丹尼尔斯', nameEn: 'Jaden McDaniels', team: '明尼苏达森林狼', position: '小前锋', age: 23, nation: '美国', nbaYears: 4, playoffs: 4, championships: 0},
+  {id: 131, nameZh: '纳兹·里德', nameEn: 'Naz Reid', team: '明尼苏达森林狼', position: '中锋', age: 24, nation: '美国', nbaYears: 5, playoffs: 4, championships: 0},
+  {id: 132, nameZh: '亚历山大-沃克', nameEn: 'Nickeil Alexander-Walker', team: '明尼苏达森林狼', position: '得分后卫', age: 25, nation: '加拿大', nbaYears: 5, playoffs: 4, championships: 0},
+  {id: 133, nameZh: '凯尔·安德森', nameEn: 'Kyle Anderson', team: '明尼苏达森林狼', position: '大前锋', age: 30, nation: '美国', nbaYears: 10, playoffs: 7, championships: 0},
+  {id: 134, nameZh: '蒙特·莫里斯', nameEn: 'Monte Morris', team: '明尼苏达森林狼', position: '控球后卫', age: 28, nation: '美国', nbaYears: 7, playoffs: 6, championships: 0},
+  {id: 135, nameZh: '乔丹·麦克劳林', nameEn: 'Jordan McLaughlin', team: '明尼苏达森林狼', position: '控球后卫', age: 28, nation: '美国', nbaYears: 5, playoffs: 4, championships: 0},
+  {id: 136, nameZh: '科怀·伦纳德', nameEn: 'Kawhi Leonard', team: '洛杉矶快船', position: '小前锋', age: 32, nation: '美国', nbaYears: 13, playoffs: 11, championships: 2},
+  {id: 137, nameZh: '保罗·乔治', nameEn: 'Paul George', team: '洛杉矶快船', position: '小前锋', age: 34, nation: '美国', nbaYears: 14, playoffs: 11, championships: 0},
+  {id: 138, nameZh: '詹姆斯·哈登', nameEn: 'James Harden', team: '洛杉矶快船', position: '控球后卫', age: 34, nation: '美国', nbaYears: 15, playoffs: 12, championships: 0},
+  {id: 139, nameZh: '拉塞尔·威斯布鲁克', nameEn: 'Russell Westbrook', team: '洛杉矶快船', position: '控球后卫', age: 35, nation: '美国', nbaYears: 16, playoffs: 16, championships: 1},
+  {id: 140, nameZh: '伊维察·祖巴茨', nameEn: 'Ivica Zubac', team: '洛杉矶快船', position: '中锋', age: 27, nation: '克罗地亚', nbaYears: 8, playoffs: 5, championships: 0},
+  {id: 141, nameZh: '诺曼·鲍威尔', nameEn: 'Norman Powell', team: '洛杉矶快船', position: '得分后卫', age: 31, nation: '美国', nbaYears: 9, playoffs: 6, championships: 1},
+  {id: 142, nameZh: '特伦斯·曼', nameEn: 'Terance Mann', team: '洛杉矶快船', position: '得分后卫', age: 27, nation: '美国', nbaYears: 5, playoffs: 4, championships: 0},
+  {id: 143, nameZh: '阿米尔·科菲', nameEn: 'Amir Coffey', team: '洛杉矶快船', position: '得分后卫', age: 26, nation: '美国', nbaYears: 4, playoffs: 3, championships: 0},
+  {id: 144, nameZh: '丹尼尔·泰斯', nameEn: 'Daniel Theis', team: '洛杉矶快船', position: '中锋', age: 32, nation: '德国', nbaYears: 8, playoffs: 3, championships: 0},
+  {id: 145, nameZh: '博恩斯·海兰德', nameEn: 'Bones Hyland', team: '洛杉矶快船', position: '控球后卫', age: 23, nation: '美国', nbaYears: 3, playoffs: 2, championships: 0},
+  {id: 146, nameZh: '达龙·福克斯', nameEn: 'De\'Aaron Fox', team: '萨克拉门托国王', position: '控球后卫', age: 26, nation: '美国', nbaYears: 7, playoffs: 2, championships: 0},
+  {id: 147, nameZh: '多曼塔斯·萨博尼斯', nameEn: 'Domantas Sabonis', team: '萨克拉门托国王', position: '中锋', age: 28, nation: '立陶宛', nbaYears: 8, playoffs: 4, championships: 0},
+  {id: 148, nameZh: '基根·默里', nameEn: 'Keegan Murray', team: '萨克拉门托国王', position: '大前锋', age: 23, nation: '美国', nbaYears: 2, playoffs: 2, championships: 0},
+  {id: 149, nameZh: '马利克·蒙克', nameEn: 'Malik Monk', team: '萨克拉门托国王', position: '得分后卫', age: 26, nation: '美国', nbaYears: 7, playoffs: 4, championships: 0},
+  {id: 150, nameZh: '凯文·赫尔特', nameEn: 'Kevin Huerter', team: '萨克拉门托国王', position: '得分后卫', age: 25, nation: '美国', nbaYears: 6, playoffs: 2, championships: 0},
+  {id: 151, nameZh: '哈里森·巴恩斯', nameEn: 'Harrison Barnes', team: '萨克拉门托国王', position: '小前锋', age: 32, nation: '美国', nbaYears: 12, playoffs: 9, championships: 1},
+  {id: 152, nameZh: '特雷·莱尔斯', nameEn: 'Trey Lyles', team: '萨克拉门托国王', position: '大前锋', age: 28, nation: '加拿大', nbaYears: 9, playoffs: 3, championships: 0},
+  {id: 153, nameZh: '戴维恩·米切尔', nameEn: 'Davion Mitchell', team: '萨克拉门托国王', position: '控球后卫', age: 25, nation: '美国', nbaYears: 3, playoffs: 2, championships: 0},
+  {id: 154, nameZh: '克里斯·杜瓦蒂', nameEn: 'Chris Duarte', team: '萨克拉门托国王', position: '得分后卫', age: 26, nation: '多米尼加', nbaYears: 3, playoffs: 2, championships: 0},
+  {id: 155, nameZh: '亚历克斯·莱恩', nameEn: 'Alex Len', team: '萨克拉门托国王', position: '中锋', age: 31, nation: '乌克兰', nbaYears: 11, playoffs: 3, championships: 0},
+  {id: 156, nameZh: '锡安·威廉森', nameEn: 'Zion Williamson', team: '新奥尔良鹈鹕', position: '大前锋', age: 23, nation: '美国', nbaYears: 5, playoffs: 2, championships: 0},
+  {id: 157, nameZh: '布兰登·英格拉姆', nameEn: 'Brandon Ingram', team: '新奥尔良鹈鹕', position: '小前锋', age: 26, nation: '美国', nbaYears: 8, playoffs: 4, championships: 0},
+  {id: 158, nameZh: 'CJ·麦科勒姆', nameEn: 'CJ McCollum', team: '新奥尔良鹈鹕', position: '控球后卫', age: 32, nation: '美国', nbaYears: 11, playoffs: 9, championships: 0},
+  {id: 159, nameZh: '赫伯特·琼斯', nameEn: 'Herbert Jones', team: '新奥尔良鹈鹕', position: '小前锋', age: 25, nation: '美国', nbaYears: 3, playoffs: 2, championships: 0},
+  {id: 160, nameZh: '特雷·墨菲三世', nameEn: 'Trey Murphy III', team: '新奥尔良鹈鹕', position: '小前锋', age: 24, nation: '美国', nbaYears: 3, playoffs: 2, championships: 0},
+  {id: 161, nameZh: '约纳斯·瓦兰丘纳斯', nameEn: 'Jonas Valanciunas', team: '新奥尔良鹈鹕', position: '中锋', age: 32, nation: '立陶宛', nbaYears: 12, playoffs: 5, championships: 0},
+  {id: 162, nameZh: '何塞·阿尔瓦拉多', nameEn: 'Jose Alvarado', team: '新奥尔良鹈鹕', position: '控球后卫', age: 26, nation: '美国', nbaYears: 3, playoffs: 2, championships: 0},
+  {id: 163, nameZh: '纳吉·马歇尔', nameEn: 'Naji Marshall', team: '新奥尔良鹈鹕', position: '前锋', age: 26, nation: '美国', nbaYears: 4, playoffs: 3, championships: 0},
+  {id: 164, nameZh: '拉里·南斯', nameEn: 'Larry Nance Jr.', team: '新奥尔良鹈鹕', position: '大前锋', age: 31, nation: '美国', nbaYears: 9, playoffs: 5, championships: 0},
+  {id: 165, nameZh: '戴森·丹尼尔斯', nameEn: 'Dyson Daniels', team: '新奥尔良鹈鹕', position: '得分后卫', age: 21, nation: '澳大利亚', nbaYears: 2, playoffs: 1, championships: 0},
+  {id: 166, nameZh: '泰瑞斯·哈利伯顿', nameEn: 'Tyrese Haliburton', team: '印第安纳步行者', position: '控球后卫', age: 24, nation: '美国', nbaYears: 4, playoffs: 2, championships: 0},
+  {id: 167, nameZh: '帕斯卡尔·西亚卡姆', nameEn: 'Pascal Siakam', team: '印第安纳步行者', position: '大前锋', age: 30, nation: '喀麦隆', nbaYears: 8, playoffs: 6, championships: 1},
+  {id: 168, nameZh: '迈尔斯·特纳', nameEn: 'Myles Turner', team: '印第安纳步行者', position: '中锋', age: 28, nation: '美国', nbaYears: 9, playoffs: 5, championships: 0},
+  {id: 169, nameZh: '安德鲁·内姆哈德', nameEn: 'Andrew Nembhard', team: '印第安纳步行者', position: '控球后卫', age: 24, nation: '加拿大', nbaYears: 2, playoffs: 2, championships: 0},
+  {id: 170, nameZh: '阿伦·内史密斯', nameEn: 'Aaron Nesmith', team: '印第安纳步行者', position: '小前锋', age: 24, nation: '美国', nbaYears: 4, playoffs: 4, championships: 0},
+  {id: 171, nameZh: '奥比·托平', nameEn: 'Obi Toppin', team: '印第安纳步行者', position: '前锋', age: 26, nation: '美国', nbaYears: 4, playoffs: 4, championships: 0},
+  {id: 172, nameZh: '以赛亚·杰克逊', nameEn: 'Isaiah Jackson', team: '印第安纳步行者', position: '中锋', age: 22, nation: '美国', nbaYears: 3, playoffs: 3, championships: 0},
+  {id: 173, nameZh: '本尼迪克特·马图林', nameEn: 'Bennedict Mathurin', team: '印第安纳步行者', position: '得分后卫', age: 21, nation: '美国', nbaYears: 2, playoffs: 2, championships: 0},
+  {id: 174, nameZh: '杰伦·史密斯', nameEn: 'Jalen Smith', team: '印第安纳步行者', position: '大前锋', age: 24, nation: '美国', nbaYears: 4, playoffs: 3, championships: 0},
+  {id: 175, nameZh: 'T.J.·麦康奈尔', nameEn: 'T.J. McConnell', team: '印第安纳步行者', position: '控球后卫', age: 32, nation: '美国', nbaYears: 9, playoffs: 4, championships: 0},
+  {id: 176, nameZh: '德玛尔·德罗赞', nameEn: 'DeMar DeRozan', team: '芝加哥公牛', position: '得分后卫', age: 34, nation: '美国', nbaYears: 15, playoffs: 9, championships: 0},
+  {id: 177, nameZh: '扎克·拉文', nameEn: 'Zach LaVine', team: '芝加哥公牛', position: '得分后卫', age: 29, nation: '美国', nbaYears: 10, playoffs: 4, championships: 0},
+  {id: 178, nameZh: '尼古拉·武切维奇', nameEn: 'Nikola Vucevic', team: '芝加哥公牛', position: '中锋', age: 33, nation: '黑山', nbaYears: 13, playoffs: 7, championships: 0},
+  {id: 179, nameZh: '科比·怀特', nameEn: 'Coby White', team: '芝加哥公牛', position: '控球后卫', age: 24, nation: '美国', nbaYears: 5, playoffs: 2, championships: 0},
+  {id: 180, nameZh: '亚历克斯·卡鲁索', nameEn: 'Alex Caruso', team: '芝加哥公牛', position: '得分后卫', age: 30, nation: '美国', nbaYears: 7, playoffs: 5, championships: 2},
+  {id: 181, nameZh: '帕特里克·威廉姆斯', nameEn: 'Patrick Williams', team: '芝加哥公牛', position: '大前锋', age: 22, nation: '美国', nbaYears: 4, playoffs: 1, championships: 0},
+  {id: 182, nameZh: '安德烈·德拉蒙德', nameEn: 'Andre Drummond', team: '芝加哥公牛', position: '中锋', age: 30, nation: '美国', nbaYears: 12, playoffs: 5, championships: 0},
+  {id: 183, nameZh: '阿约·多苏穆', nameEn: 'Ayo Dosunmu', team: '芝加哥公牛', position: '控球后卫', age: 24, nation: '美国', nbaYears: 3, playoffs: 1, championships: 0},
+  {id: 184, nameZh: '杰文·卡特', nameEn: 'Jevon Carter', team: '芝加哥公牛', position: '控球后卫', age: 28, nation: '美国', nbaYears: 6, playoffs: 2, championships: 0},
+  {id: 185, nameZh: '托里·克雷格', nameEn: 'Torrey Craig', team: '芝加哥公牛', position: '小前锋', age: 33, nation: '美国', nbaYears: 9, playoffs: 4, championships: 0},
+];
+</script>
+<script>
+// ===== 游戏状态 =====
+const MAX_GUESSES = 7;              // 最大猜测次数
+let target = null;                  // 神秘目标球员对象
+let guesses = [];                   // 已提交的球员（用于历史与查重）
+let gameOver = false;               // 是否已结束
+let currentQuery = '';              // 当前下拉查询词
+let selectedIndex = -1;             // 下拉中当前高亮项
+
+// ===== DOM 引用 =====
+const $input   = document.getElementById('searchInput');
+const $dropdown= document.getElementById('dropdown');
+const $msg     = document.getElementById('msg');
+const $body    = document.getElementById('resultBody');
+const $remaining = document.getElementById('remainingNum');
+const $guessCount = document.getElementById('guessCount');
+const $reveal  = document.getElementById('revealArea');
+
+// 性别化：把某一列的属性返回给对应数值进行方向比较
+function compareNum(guessVal, targetVal) {
+  if (guessVal === targetVal) return 'equal';
+  return guessVal < targetVal ? 'up' : 'down';
+}
+
+// 构建一行候选 / 结果的显示文本
+function playerLabel(p) {
+  return p.nameZh + ' · ' + p.nameEn;
+}
+
+// ===== 搜索匹配（中文或英文，忽略大小写，子串匹配）=====
+function searchPlayers(query) {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  return PLAYERS.filter(function (p) {
+    if (p.nameZh.toLowerCase().indexOf(q) !== -1) return true;
+    if (p.nameEn.toLowerCase().indexOf(q) !== -1) return true;
+    return false;
+  });
+}
+
+// ===== 渲染下拉候选（不遮挡下方结果区：独立浮层 + 合理 max-height）=====
+function renderDropdown(matches) {
+  currentQuery = $input.value;
+  if (!matches.length) {
+    $dropdown.classList.add('hidden');
+    $dropdown.innerHTML = '';
+    return;
+  }
+  $dropdown.classList.remove('hidden');
+  selectedIndex = -1;
+  let html = '';
+  matches.forEach(function (p, idx) {
+    const guessed = guesses.some(function (g) { return g.id === p.id; });
+    // 候选球员始终显示英文名，方便中英文对照选择；已猜过的额外标注
+    const right = '<span style="margin-left:8px;color:#1a2a3a;font-size:13px;">' + p.nameEn + '</span>';
+    const tag = guessed ? '<span class="tag">已猜过</span>' : '';
+    html += '<div class="opt' + (idx === selectedIndex ? ' active' : '') + (guessed ? ' guessed' : '') + '" data-idx="' + idx + '" data-id="' + p.id + '">' +
+            '<span>' + p.nameZh + right + '</span>' + tag + '</div>';
+  });
+  $dropdown.innerHTML = html;
+}
+
+// ===== 更新下拉高亮 =====
+function updateHighlight() {
+  const opts = $dropdown.querySelectorAll('.opt');
+  opts.forEach(function (el, i) {
+    el.classList.toggle('active', i === selectedIndex);
+  });
+}
+
+// ===== 提交一次猜测 =====
+function submitGuess(player) {
+  // 已猜过 → 提示且不消耗次数
+  if (guesses.some(function (g) { return g.id === player.id; })) {
+    showMsg('⚠️ 已猜过该球员，请重新选择。', 'error');
+    $input.value = '';
+    closeDropdown();
+    return;
+  }
+  // 猜中判定
+  const hit = (player.id === target.id);
+  guesses.push(player);
+
+  // 渲染历史行
+  const tr = document.createElement('tr');
+  if (hit) tr.className = 'guessed-row';
+
+  const cells = [
+    player.nameZh + ' ' + player.nameEn,
+    player.team + ' ' + (player.team === target.team ? ('✓') : ('✗')),
+    player.position + ' ' + (player.position === target.position ? ('✓') : ('✗')),
+    player.nation + ' ' + (player.nation === target.nation ? ('✓') : ('✗')),
+    player.age + ' ' + arrowText(compareNum(player.age, target.age)),
+    player.nbaYears + ' ' + arrowText(compareNum(player.nbaYears, target.nbaYears)),
+    player.playoffs + ' ' + arrowText(compareNum(player.playoffs, target.playoffs)),
+    player.championships + ' ' + arrowText(compareNum(player.championships, target.championships)),
+  ];
+  const cellClasses = [
+    'name', 'no no', 'no', 'no',
+    colClass(compareNum(player.age, target.age)),
+    colClass(compareNum(player.nbaYears, target.nbaYears)),
+    colClass(compareNum(player.playoffs, target.playoffs)),
+    colClass(compareNum(player.championships, target.championships)),
+  ];
+  cells.forEach(function (txt, i) {
+    const td = document.createElement('td');
+    if (cellClasses[i].indexOf('no') === 0) {
+      // 离散列：显示具体值 + ✓ / ✗
+      const matched = txt.indexOf('✓') !== -1;
+      td.className = matched ? 'ok' : 'no';
+      td.innerHTML = txt.replace('✓', '<b class="ok">✓</b>').replace('✗', '<b class="no">✗</b>');
+    } else {
+      // 数值列：显示具体值 + 方向箭头
+      td.className = cellClasses[i];
+      td.innerHTML = txt;
+    }
+    tr.appendChild(td);
+  });
+  $body.appendChild(tr);
+
+  // 更新状态
+  const used = guesses.length;
+  $guessCount.textContent = used;
+  $remaining.textContent = MAX_GUESSES - used;
+
+  $input.value = '';
+  closeDropdown();
+
+  if (hit) {
+    endGame(player, true);
+  } else if (used >= MAX_GUESSES) {
+    endGame(target, false);
+  } else {
+    showMsg('未猜中，继续尝试（还可猜 ' + (MAX_GUESSES - used) + ' 次）。', 'info');
+    $input.focus();
+  }
+}
+
+// 箭头显示文本
+function arrowText(cmp) {
+  if (cmp === 'equal') return '<b class="equal">✓</b>';
+  if (cmp === 'up') return '<b class="up">⬆</b>';
+  return '<b class="down">⬇</b>';
+}
+function colClass(cmp) {
+  if (cmp === 'equal') return 'equal';
+  if (cmp === 'up') return 'up';
+  return 'down';
+}
+
+// ===== 结束一局 =====
+function endGame(finalPlayer, won) {
+  gameOver = true;
+  showMsg('', '');
+  let html = '';
+  if (won) {
+    html += '<h2>🎉 恭喜猜中！</h2>';
+    html += '<div class="star-name">' + finalPlayer.nameZh + '</div>';
+    html += '<div class="star-team">' + finalPlayer.nameEn + ' · ' + finalPlayer.team + '</div>';
+  } else {
+    html += '<h2>😔 7 次机会已用尽</h2>';
+    html += '<div class="star-name">神秘球员是：' + target.nameZh + '</div>';
+    html += '<div class="star-team">' + target.nameEn + ' · ' + target.team + '</div>';
+  }
+  html += '<button class="btn-new" onclick="newGame()">再来一局</button>';
+  $reveal.innerHTML = html;
+  $reveal.style.display = 'block';
+  $msg.textContent = won ? '🎉 你猜中了神秘球员！' : '答案已揭晓：' + target.nameZh;
+}
+
+// ===== 新一局 =====
+function newGame() {
+  // 随机选目标
+  target = PLAYERS[Math.floor(Math.random() * PLAYERS.length)];
+  guesses = [];
+  gameOver = false;
+  $body.innerHTML = '';
+  $reveal.style.display = 'none';
+  $reveal.innerHTML = '';
+  $remaining.textContent = MAX_GUESSES;
+  $guessCount.textContent = '0';
+  $input.value = '';
+  closeDropdown();
+  showMsg('新一局开始！输入球员名开始猜测，最多 ' + MAX_GUESSES + ' 次机会。', 'info');
+  $input.focus();
+}
+
+// ===== 消息帮助 =====
+function showMsg(text, type) {
+  $msg.textContent = text;
+  $msg.className = 'msg' + (type ? ' ' + type : '');
+}
+
+function closeDropdown() {
+  $dropdown.classList.add('hidden');
+  $dropdown.innerHTML = '';
+  selectedIndex = -1;
+}
+
+// ===== 事件绑定 =====
+$input.addEventListener('input', function () {
+  if (gameOver) return;
+  const q = $input.value;
+  const matches = searchPlayers(q);
+  renderDropdown(matches);
+});
+
+// 键盘导航
+$input.addEventListener('keydown', function (e) {
+  const opts = $dropdown.querySelectorAll('.opt');
+  if (e.key === 'ArrowDown') { e.preventDefault(); selectNext(1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); selectNext(-1); }
+  else if (e.key === 'Enter') {
+    e.preventDefault();
+    confirmSelection();
+  }
+  else if (e.key === 'Escape') { closeDropdown(); }
+});
+
+function selectNext(dir) {
+  const opts = $dropdown.querySelectorAll('.opt');
+  if (!opts.length) return;
+  selectedIndex = (selectedIndex + dir + opts.length) % opts.length;
+  $dropdown.querySelectorAll('.opt').forEach(function (el, i) {
+    el.classList.toggle('active', i === selectedIndex);
+  });
+}
+
+function confirmSelection() {
+  const opts = $dropdown.querySelectorAll('.opt');
+  if (opts.length === 0) return;
+  let chosen = null;
+  if (selectedIndex >= 0 && selectedIndex < opts.length) {
+    chosen = opts[selectedIndex];
+  } else {
+    chosen = opts[0];
+  }
+  var pid = Number(chosen.getAttribute('data-id'));
+  var player = PLAYERS.find(function (p) { return p.id === pid; });
+  if (player) submitGuess(player);
+}
+
+// 点击下拉项
+$dropdown.addEventListener('click', function (e) {
+  var opt = e.target.closest('.opt');
+  if (!opt) return;
+  var pid = Number(opt.getAttribute('data-id'));
+  var player = PLAYERS.find(function (p) { return p.id === pid; });
+  if (player) submitGuess(player);
+});
+
+// 提交按钮
+document.getElementById('submitBtn').addEventListener('click', function () {
+  confirmSelection();
+});
+
+// 点击空白区关闭下拉
+document.addEventListener('click', function (e) {
+  if (!e.target.closest('.input-area')) closeDropdown();
+});
+
+// ===== 启动 =====
+newGame();
+</script>
+</body>
+</html>

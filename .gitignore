@@ -21,3 +21,6 @@ docs/agents/
 
 # 每次运行的工作区（产物 + session.log）
 runs/
+
+# 内部开发问题记录（不上传 GitHub）
+docs/开发问题记录.md
