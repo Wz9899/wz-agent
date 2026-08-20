@@ -10,17 +10,8 @@ venv/
 *.log
 .DS_Store
 
-# 内部开发文件（保留本地，不上传 GitHub）
-PROGRESS.md
-test_api.py
-AGENTS.md
-docs/agents/
-
 # 本地 issue tracker 运行产物（triage / to-tickets 生成）
 .scratch/
 
 # 每次运行的工作区（产物 + session.log）
 runs/
-
-# 内部开发问题记录（不上传 GitHub）
-docs/开发问题记录.md
