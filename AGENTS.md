@@ -1,22 +1,20 @@
-<!-- 注：本文件于 2026-08-20 在公司电脑重建（基础版）。家里电脑有更完整的版本，合并后删除本注释。 -->
+## Agent skills
 
-# AGENTS.md — AI Agent 协作规范
+### Issue tracker
 
-本项目的开发协作约定，与 PROGRESS.md 配套阅读。
+Issues 以本地 markdown 文件形式存放在 `.scratch/` 下。详见 `docs/agents/issue-tracker.md`。
 
-## 语言与风格
+### Triage labels
 
-- 始终用中文交流
-- 一步一步写代码，每步解释：做了什么、用了什么、为什么这样写
+使用默认的五个标准 triage 标签：`needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix`。详见 `docs/agents/triage-labels.md`。
 
-## 角色分工
+### Domain docs
 
-- **用户手搓代码**：agent 只指导，不替用户写
-- 例外：用户明确说"你来写"时，agent 才直接动手
+单上下文（single-context）布局——根目录 `CONTEXT.md` + `docs/adr/`。详见 `docs/agents/domain.md`。
 
-## 会话流程
+### 会话流程
 
 1. 会话开始先读 `PROGRESS.md` 接上进度
-2. 改动代码前先读相关源文件，理解现状
+2. 改动代码前先读相关源文件，理解现状再动手
 3. 每完成一个模块，更新 `PROGRESS.md` 的"已完成/待完成"
 4. 开发中踩的坑记入 `docs/开发问题记录.md`

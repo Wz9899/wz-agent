@@ -1,37 +1,6 @@
-<!-- 注：本文件于 2026-08-20 在公司电脑重建（基础版）。家里电脑有更完整的版本，合并后删除本注释。 -->
-
 # 项目进度 & Agent 行为规范
 
 > 这份文档专门写给 AI coding agent 看。每次会话开始时先读这里。
-
----
-
-## ⚠️ 待办任务：多机文档合并（2026-08-20，由家里电脑的 agent 执行）
-
-**背景**：公司电脑重建了本项目的基础文档并推送（commit `67f7707`）。家里本机有更完整的旧版本，它们当时被 `.gitignore` 忽略、未被 git 跟踪。本任务把家里版本合并上传，完成后两台机器文档一致。
-
-**执行步骤**（在项目根目录，Git Bash）：
-
-1. **备份家里本地版本**——它们未被跟踪，直接 `git pull` 会被拒绝（untracked files would be overwritten）：
-   ```bash
-   mv PROGRESS.md PROGRESS.home.md
-   mv AGENTS.md AGENTS.home.md
-   mv docs/开发问题记录.md docs/开发问题记录.home.md
-   mv docs/agents docs/agents.home        # 若不存在则跳过
-   ```
-2. **拉取公司版本**：`git pull`
-3. **逐个合并**——家里版本为主体（更完整），公司版本为参考：
-   - `PROGRESS.md` / `AGENTS.md`：以 `*.home.md` 内容为准；公司版若有新增的规范条目则吸收进来
-   - `docs/开发问题记录.md`：家里版本为准（含全部历史问题记录）
-   - `docs/agents/`：把 `docs/agents.home/` 中的 `domain.md`、`issue-tracker.md`、`triage-labels.md` 复制进 `docs/agents/`，然后删除占位的 `docs/agents/README.md`
-4. **清理**：删除每个合并后文件顶部的 `<!-- 注：…2026-08-20 公司电脑重建… -->` 标记；确认无误后删除所有 `*.home.md` 和 `docs/agents.home/` 备份
-5. **提交推送**：
-   ```bash
-   git add -A
-   git commit -m "docs: 合并家里电脑的开发文档（多机同步完成）"
-   git push
-   ```
-6. 完成后，公司电脑 `git pull` 即可拿到合并版。此任务完成后**删除本节**。
 
 ---
 
@@ -39,33 +8,71 @@
 
 1. **一步一步写代码**——每一步都要解释实现了什么、用了什么函数、为什么这样写
 2. **中文回复**
-3. **用户手搓代码**——agent 只指导，不替用户写。除非用户明确说"你来写"
+3. **Agent 来写代码**——每次由 agent 直接编写代码，不需要用户动手
 4. **每次写完一个模块**，更新本文档的"已完成"和"待完成"
-5. **改动代码前先读相关源文件**，接上进度再动手
+5. **按方法/属性为单位编写**——一次只写一个方法或一个属性，写完立即解释：用了什么、为什么这样写。不需要提前问用户，写完后解释即可
+6. **改动代码前先读相关源文件**，接上进度再动手
 
 ---
 
 ## 已完成
 
-| 版本 | 模块 | 状态 |
+| 模块 | 文件 | 状态 |
 |---|---|---|
-| v0.1 | DeepSeek API 连通 | ✅ |
-| v0.2 | ReAct 循环 + 工具调用（read/write/edit/bash） | ✅ |
-| v0.3 | Bash 安全模式——auto/plan 双模式 | ✅ |
-| v0.4 | 需求澄清——Agent 主动追问用户 | ✅ |
-| v0.5 | 编码执行——根据 Spec 自动生成代码 | ✅ |
-| v1.0 | CLI 完整交互 + bash 安全模式 | ✅ |
-| v2.0 | triage（issue 分诊）+ to-tickets（任务拆解） | ✅ |
-| — | 示例项目 examples/nba-wordle（全流程产物） | ✅ |
+| 项目骨架 | `CONTEXT.md`, `docs/adr/` | ✅ |
+| Git 仓库 | `.git`, GitHub: `Wz9899/wz-agent` | ✅ |
+| Python 环境 | `requirements.txt`（全局安装，不用 venv） | ✅ |
+| ReAct 循环 v1 | `src/agent/loop.py` — 最简 API 调用（无工具） | ✅ 已验证 |
+| 测试脚本 | `test_api.py` | ✅ 通过 |
+| README | `README.md` | ✅ |
+| 入口脚本 | `src/main.py` | ✅ |
+| 依赖列表 | `requirements.txt` | ✅ |
+| .gitignore | 清理完毕，区分公开文件和内部文件 | ✅ |
+| 工具: base | `src/agent/tools/base.py` — 抽象基类，自动推断参数 schema | ✅ |
+| 工具: read | `src/agent/tools/read.py` — 读文件 + 错误处理 + 截断 | ✅ |
+| 工具: write | `src/agent/tools/write.py` — 写文件 + 自动创建目录 | ✅ |
+| 工具: edit | `src/agent/tools/edit.py` — 精确匹配替换 + 唯一性校验 | ✅ |
+| 工具: bash | `src/agent/tools/bash.py` — 执行命令 + 30s 超时 + 危险命令拦截 | ✅ |
+| 工具注册表 | `src/agent/tools/__init__.py` — ALL_TOOLS 字典 | ✅ |
+| ReAct 循环 v2 | `src/agent/loop.py` — 完整 ReAct 循环 + 工具调用 | ✅ |
+| Bash 安全模式 | `src/agent/tools/bash.py` — auto/plan 双模式（计划收集->批量执行）| ✅ |
+| Prompt: 需求澄清 | `src/agent/prompts/clarify.py` — 阶段一，主动追问用户需求 | ✅ |
+| Prompt: 编码执行 | `src/agent/prompts/code.py` — 阶段二，按 spec.md 编码 | ✅ |
+| CLI 入口 | `src/main.py`（click + rich，参数自动校验） | ✅ |
+| 错误重试逻辑 | `src/agent/loop.py` — `run_with_retry()` 失败回喂 LLM，最多 3 次 | ✅ |
+| 上下文管理 | `src/agent/context.py` — spec.md 定位/读写 + 编码阶段自动注入 | ✅ |
+| Issue 文件操作 | `src/agent/issues.py` — .scratch/ 定位、编号分配、Status 行读写、目标解析 | ✅ |
+| 工具: triage | `src/agent/tools/triage.py` — list_issues + set_issue_status（五标签状态机） | ✅ |
+| 工具: to-tickets | `src/agent/tools/tickets.py` — allocate_issue（编号唯一性由代码保证） | ✅ |
+| Prompt: triage | `src/agent/prompts/triage.py` — 分诊状态机，issue → 五档标签 | ✅ |
+| Prompt: to-tickets | `src/agent/prompts/to_tickets.py` — spec → 垂直切片 tickets | ✅ |
+| CLI v2 子命令 | `src/main.py` — triage / to-tickets 分发 + chdir 锚定项目根 | ✅ |
+| 路径常量收敛 | `src/agent/paths.py` — PROJECT_ROOT 等单一事实来源 | ✅ |
+| issue 引用歧义处理 | `src/agent/issues.py` — 精确匹配优先 + 歧义抛 ValueError | ✅ |
+| API 错误不重试 | `src/agent/loop.py` — [API-ERR] 直接返回，不浪费重试轮次 | ✅ |
+| 单元测试 | `tests/` + `pytest.ini` — issues/edit/bash/base/loop 五组 48 例 | ✅ |
+| 惰性 client | `src/agent/loop.py` — _get_client() 修复 .env 加载时序 | ✅ |
+| 环境变量模板 | `.env.example` — 复制为 .env 即可配置 Key | ✅ |
+| 安全边界文档 | README「安全边界」+ .env 用法说明 | ✅ |
+| 历史压缩 | `src/agent/loop.py` — _maybe_compact 超预算时裁剪早期轮次 | ✅ |
+| 流式输出 | `src/agent/loop.py` + `src/main.py` — stream 参数 + `--no-stream`，实时打印思考与工具过程 | ✅ |
+| 监督式执行 | `interactive.py` + `tools/interact.py` + `loop.py` — ask_user（澄清问答）/ checkpoint（非阻塞进度汇报）/ Ctrl-C 中断 | ✅ |
+| 运行工作区 | `runtime.py` — 每次运行 runs/<时间戳>/，spec/代码/session.log（流式回放） | ✅ |
+| 示例项目 | `examples/nba-wordle/` — NBA Wordle（wz-agent 全流程产物） | ✅ |
 
-## 进行中 / 待完成
+## 待完成
 
-| 优先级 | 模块 | 说明 |
-|---|---|---|
-| 1 | v2.1 ticket ↔ code 阶段自动衔接 | 拆解出的 ticket 自动流转到编码阶段 |
+✅ **v2.0 目标（triage + to-tickets）已全部完成**
+
+## 后续版本
+
+| 版本 | 功能 |
+|---|---|
+| v2.1 | triage 支持批量评论模板、ticket 与 code 阶段自动衔接（逐个 ticket 交办） |
 
 ## 技术选型
 
-- 语言： Python 3.12
-- LLM: DeepSeek（`deepseek-chat`，OpenAI 兼容 API）
-- CLI: click；UI: rich
+- 语言: Python 3.12
+- LLM: DeepSeek (`deepseek-chat`, OpenAI 兼容 API)
+- CLI: click
+- UI: rich

@@ -1,30 +1,26 @@
-"""快速测试 DeepSeek API 连通性"""
-from openai import OpenAI
+"""临时测试：验证 DeepSeek API 调用是否正常。"""
+
 import os
+import sys
+
+# 把 src 加入路径
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
+
+# 加载 .env 文件（如果有的话）
 from dotenv import load_dotenv
-
-# 加载 .env
 load_dotenv()
-api_key = os.getenv("DEEPSEEK_API_KEY")
 
-if not api_key:
-    print("[ERROR] DEEPSEEK_API_KEY not set")
-    exit(1)
+from agent.loop import run
 
-print(f"[OK] Key loaded: {api_key[:10]}...")
+if not os.environ.get("DEEPSEEK_API_KEY"):
+    print("错误：请设置环境变量 DEEPSEEK_API_KEY")
+    print("  export DEEPSEEK_API_KEY=sk-xxxx   (Linux/Mac)")
+    print("  set DEEPSEEK_API_KEY=sk-xxxx      (Windows)")
+    sys.exit(1)
 
-# 测试连通性
-client = OpenAI(
-    api_key=api_key,
-    base_url="https://api.deepseek.com"
+result = run(
+    system_prompt="你是一个简洁的助手，用中文回答。",
+    user_message="用一句话介绍什么是 ReAct 循环。",
 )
-
-try:
-    response = client.chat.completions.create(
-        model="deepseek-chat",
-        messages=[{"role": "user", "content": "Reply 'API TEST SUCCESS'"}],
-        max_tokens=20
-    )
-    print(f"[OK] API test succeeded! Response: {response.choices[0].message.content}")
-except Exception as e:
-    print(f"[ERROR] API test failed: {e}")
+print("模型回复：")
+print(result)
