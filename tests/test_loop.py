@@ -250,6 +250,22 @@ def test_run_interactive_exit_aborts(monkeypatch):
     assert out == "[ABORT] 用户主动退出对话。"
 
 
+def test_run_interactive_clarify_never_streams(monkeypatch):
+    """澄清对话（retry=False）不流式展示思考——即使传入 stream=True 也强制关闭。"""
+    monkeypatch.setattr(interactive, "ENABLED", True)
+    streams: list[bool] = []
+    results = iter(["[DONE] 完成"])
+
+    def fake_run_loop(messages, **kwargs):
+        streams.append(kwargs.get("stream"))
+        return next(results)
+
+    monkeypatch.setattr(loop, "_run_loop", fake_run_loop)
+    loop.run_interactive("sp", "um", retry=False, stream=True)
+
+    assert streams == [False]
+
+
 def test_run_interactive_code_autonomous(monkeypatch):
     """code（retry=True）自主执行：跑完一轮即返回，不进入对话循环等回答。"""
     monkeypatch.setattr(interactive, "ENABLED", True)
@@ -302,3 +318,29 @@ def test_run_loop_handles_invalid_json_args(monkeypatch):
     assert result == "任务完成"
     # 错误消息被作为 tool 结果返回给 LLM（agent 未崩溃，LLM 可据此重试）
     assert any("[ERR] 工具 'read' 的参数不是合法 JSON" in m.get("content", "") for m in msgs)
+
+
+def test_run_loop_sets_mode_on_injected_bash_not_global(monkeypatch):
+    """tools 注入独立 bash 时，mode 写到该实例，不改全局单例（防污染父循环 plan）。"""
+    from agent.tools import get_bash_tool
+    from agent.tools.bash import BashTool
+
+    global_bash = get_bash_tool()
+    global_bash.mode = "plan"
+    global_bash.run("echo parent")  # 父循环已收集一条执行计划
+
+    fresh = BashTool()  # 子 agent 注入的独立实例（task.py 的做法）
+
+    resp = _D(choices=[_D(message=_D(role="assistant", content="done", tool_calls=None))])
+    client = _D(chat=_D(completions=_D(create=lambda **kw: resp)))
+    monkeypatch.setattr(loop, "_get_client", lambda: client)
+
+    msgs = [{"role": "system", "content": "S"}, {"role": "user", "content": "U"}]
+    result = loop._run_loop(msgs, stream=False, tools={"bash": fresh}, bash_safety_mode="auto")
+
+    assert result == "done"
+    assert fresh.mode == "auto"        # 模式写到注入实例
+    assert global_bash.mode == "plan"  # 全局单例未被翻成 auto
+    assert len(global_bash.plan) == 1  # 父循环计划未被清空
+
+    global_bash.mode = "auto"  # 还原全局单例状态

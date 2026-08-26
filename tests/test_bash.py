@@ -1,5 +1,6 @@
 """bash 工具单元测试：危险命令拦截 + auto/plan 双模式状态机。"""
 
+import os
 import subprocess
 
 import pytest
@@ -18,6 +19,18 @@ def tool() -> BashTool:
 def test_auto_executes_echo(tool):
     out = tool.run("echo hello")
     assert "hello" in out
+
+
+def test_bash_syntax_works(tool):
+    """bash 语法（POSIX 重定向/管道）可用 —— Windows 下应真用 bash 而非 cmd。
+
+    回归背景: Windows 的 shell=True 走 cmd.exe，/dev/null 重定向直接报
+    “系统找不到指定的路径”，LLM 生成的 bash 语法全部失败。
+    """
+    if os.name == "nt" and not BashTool._bash_available():
+        pytest.skip("本机无 bash（非 git-bash 环境），退回 cmd 路径")
+    out = tool.run("echo old > /dev/null && echo bash-syntax-ok | cat")
+    assert "bash-syntax-ok" in out
 
 
 def test_dangerous_commands_blocked(tool):

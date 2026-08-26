@@ -295,7 +295,11 @@ def main(
                 bash_safety_mode=safety_mode,
                 stream=stream,
             )
-            console.print("\n[bold green]完成[/]")
+            if retry:
+                console.print("\n[bold green]完成[/]")  # code：思考已流式展示，短收尾
+            else:
+                # clarify：不流式展示思考，[DONE] 结论需显式呈现
+                console.print(Panel(result, title="wz-agent 回复"))
         else:
             # 非流式且非交互：status spinner + 结果 Panel
             with console.status(

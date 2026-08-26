@@ -41,3 +41,7 @@ Agent 可调用的四个基础能力：
 - **自动模式** — agent 直接执行命令，适合低风险操作（安装依赖、跑测试）
 - **计划模式** — agent 列出命令清单，用户确认后批量执行，适合高风险操作
 _Avoid_: 无限制直接执行
+
+**还原点（restore point，规划中）**：
+harness 在运行边界（agent 动手前、跑完后）自动 `git commit` 打下的版本标记。它不是 agent 的工具——agent 不感知、不调用，由运行时自动创建。三个用途：diff 看清 agent 改了什么、reset 一键回滚坏改动、log 回看历史。跨会话状态由还原点 + 文件系统承担，不建独立记忆系统。agent 自己要用 git 时走 bash 工具，与还原点无关（机制是 harness 的，命令是 agent 的）。
+_Avoid_: 做成 agent 工具（如 snapshot / git_commit）；称"git 快照"或"项目快照"——名字以 git 开头会被误读成可调用工具，与 bash 里跑 git 命令混淆

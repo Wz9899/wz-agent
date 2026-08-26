@@ -2,7 +2,7 @@
 
 一个从零手搓的通用编码助手——主动追问需求，自动生成代码。
 
-> ✅ 当前版本：v2.0 — triage（issue 分诊）+ to-tickets（任务拆解）
+> ✅ 当前版本：v2.1 — 子 agent 派发（task 工具）+ Windows bash 修复
 
 ## 功能规划
 
@@ -15,7 +15,8 @@
 | v0.5 | 编码执行 —— 根据 Spec 自动生成代码 | ✅ |
 | v1.0 | CLI 完整交互 + bash 安全模式 | ✅ |
 | v2.0 | triage（issue 分诊）+ to-tickets（任务拆解） | ✅ |
-| v2.1 | ticket ↔ code 阶段自动衔接 | 📋 |
+| v2.1 | 子 agent 派发（task 工具，LLM 自主决策）+ Windows bash 修复 | ✅ |
+| v2.2 | ticket ↔ code 阶段自动衔接 | 📋 |
 
 ## 技术栈
 
@@ -127,6 +128,6 @@ wz-agent/
         ├── loop.py         # ReAct 循环引擎（工具调用 + 自动重试）
         ├── context.py      # spec.md 定位/读写/注入
         ├── issues.py       # .scratch/ issue 文件操作层（v2.0）
-        ├── tools/          # read/write/edit/bash + triage/tickets 工具
+        ├── tools/          # read/write/edit/bash/task + triage/tickets 工具
         └── prompts/        # clarify / code / triage / to-tickets 四套 prompt
 ```

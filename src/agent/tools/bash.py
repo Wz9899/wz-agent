@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 
 from agent.tools.base import BaseTool
@@ -40,6 +42,18 @@ class BashTool(BaseTool):
     # --------------------------------------------------------
 
     TIMEOUT: int = 30
+
+    # bash 可用性探测结果缓存（模块级，进程内只探一次）
+    _BASH_PATH: str | None = None
+    _BASH_CHECKED: bool = False
+
+    @classmethod
+    def _bash_available(cls) -> str | None:
+        """返回 bash 可执行文件路径（Windows 上通常是 git-bash），不可用返回 None。"""
+        if not cls._BASH_CHECKED:
+            cls._BASH_PATH = shutil.which("bash")
+            cls._BASH_CHECKED = True
+        return cls._BASH_PATH
 
     _DANGEROUS_PREFIXES: tuple[str, ...] = (
         "rm -rf /",
@@ -233,19 +247,67 @@ class BashTool(BaseTool):
 
         因为 _execute 和 _execute_plan 各自在调用前做了安全检查，
         所以这里只负责执行和超时/错误处理。
+
+        执行路径:
+          - Windows + bash 可用: 命令写入临时脚本，用 bash 执行。
+            原因: shell=True 在 Windows 下走 cmd.exe，而 LLM 生成的是
+            bash 语法（POSIX 路径 /c/...、/dev/null 重定向、&& 链、单引号），
+            cmd 解析不了直接报“系统找不到指定的路径”，agent 只能反复换写法烧步数。
+            临时脚本法避免引号转义问题，命令内容原样到达 bash。
+          - 其他情况（POSIX 或无 bash 的 Windows）: 退回 shell=True 原路径。
+        """
+        bash_path = self._bash_available()
+        if os.name == "nt" and bash_path:
+            return self._execute_via_bash(bash_path, command)
+        stdout, stderr, err = self._spawn(command, shell=True)
+        if err:
+            return err
+        return self._assemble_output(stdout, stderr)
+
+    def _execute_via_bash(self, bash_path: str, command: str) -> str:
+        """用 bash 执行命令（Windows 路径）。"""
+        # newline="\n": 防止 Windows 文本模式把 \n 写成 \r\n 破坏 heredoc/行延续
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
+        ) as script:
+            script.write(command)
+            script_path = script.name
+        try:
+            # encoding="utf-8": git-bash 工具链输出 UTF-8；按 locale（GBK）解码会乱码。
+            # 混入的原生 Windows 程序 GBK 输出会被 errors=replace 替换为 �，不致崩溃。
+            stdout, stderr, err = self._spawn(
+                [bash_path, script_path], shell=False, encoding="utf-8"
+            )
+        finally:
+            try:
+                os.unlink(script_path)
+            except OSError:
+                pass
+        if err:
+            return err
+        return self._assemble_output(stdout, stderr)
+
+    def _spawn(
+        self, args, *, shell: bool, encoding: str | None = None
+    ) -> tuple[str, str, str | None]:
+        """启动子进程并等待完成。返回 (stdout, stderr, 错误消息)。
+
+        错误消息非 None 表示超时/启动失败/异常，调用方直接返回给 LLM；
+        正常完成时前两项为文本输出。
         """
         # Windows 上 shell=True 的 cmd 会衍生子进程，超时需能终止整棵进程树
         creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+        popen_kwargs: dict = dict(
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            errors="replace",   # 非法字节替换为 �，避免读取线程解码崩溃导致流为 None
+            creationflags=creationflags,
+        )
+        if encoding:
+            popen_kwargs["encoding"] = encoding
         try:
-            proc = subprocess.Popen(
-                command,
-                shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                errors="replace",   # 非法字节替换为 �，避免读取线程解码崩溃导致流为 None
-                creationflags=creationflags,
-            )
+            proc = subprocess.Popen(args, shell=shell, **popen_kwargs)
             stdout, stderr = proc.communicate(timeout=self.TIMEOUT)
         except subprocess.TimeoutExpired:
             self._kill_process_tree(proc)
@@ -253,17 +315,25 @@ class BashTool(BaseTool):
                 proc.communicate(timeout=5)  # 收尾，清空残留管道，防僵尸
             except Exception:
                 pass
-            return (
+            return "", "", (
                 f"[ERR] 超时（>{self.TIMEOUT}s）：已连同子进程强制终止。"
                 f"\n提示：如果命令需要更长时间，请考虑拆分或优化。"
             )
         except FileNotFoundError:
-            first_word = command.strip().split()[0] if command.strip() else command
-            return f"[ERR] 命令未找到：'{first_word}'"
+            # str（shell=True）报命令首词；list（shell=False）报可执行文件本身。
+            # 不能统一 join 后 split()[0]：bash 路径含空格会被切碎（如 C:\Program Files\...）。
+            if isinstance(args, str):
+                first_word = args.strip().split()[0] if args.strip() else args
+            else:
+                first_word = args[0]
+            return "", "", f"[ERR] 命令未找到：'{first_word}'"
         except Exception as e:
-            return f"[ERR] 执行出错：{e}"
+            return "", "", f"[ERR] 执行出错：{e}"
+        return stdout or "", stderr or "", None
 
-        # 拼接 stdout 和 stderr（None 防御：极端情况下子进程流可能为 None）
+    @staticmethod
+    def _assemble_output(stdout: str, stderr: str) -> str:
+        """拼接 stdout/stderr 为返回文本（None 防御：极端情况下流可能为 None）。"""
         output_parts: list[str] = []
 
         stdout_text = (stdout or "").strip()

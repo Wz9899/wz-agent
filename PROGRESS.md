@@ -59,16 +59,21 @@
 | 监督式执行 | `interactive.py` + `tools/interact.py` + `loop.py` — ask_user（澄清问答）/ checkpoint（非阻塞进度汇报）/ Ctrl-C 中断 | ✅ |
 | 运行工作区 | `runtime.py` — 每次运行 runs/<时间戳>/，spec/代码/session.log（流式回放） | ✅ |
 | 示例项目 | `examples/nba-wordle/` — NBA Wordle（wz-agent 全流程产物） | ✅ |
+| 子 agent 派发 | `tools/task.py` — task 工具（investigator/coder），LLM 自主决策、独立上下文、递归防线 | ✅ 已验证（DeepSeek 全链路） |
+| 工具集注入 | `loop.py` — run()/_run_loop() 新增 tools 参数，支持受限注册表 | ✅ |
+| Windows bash 修复 | `tools/bash.py` — Windows 下用 git-bash 执行（临时脚本法），POSIX 语法不再撞 cmd 墙 | ✅ 已验证 |
 
 ## 待完成
 
 ✅ **v2.0 目标（triage + to-tickets）已全部完成**
+✅ **v2.1 目标（子 agent 派发 + Windows bash 修复）已全部完成**
 
-## 后续版本
+## 版本规划
 
-| 版本 | 功能 |
-|---|---|
-| v2.1 | triage 支持批量评论模板、ticket 与 code 阶段自动衔接（逐个 ticket 交办） |
+| 版本 | 功能 | 状态 |
+|---|---|---|
+| v2.1 | 子 agent 派发（task 工具）+ Windows bash 修复 | ✅ |
+| v2.2 | triage 支持批量评论模板、ticket 与 code 阶段自动衔接（逐个 ticket 交办） | 📋 |
 
 ## 技术选型
 

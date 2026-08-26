@@ -11,7 +11,7 @@ from openai import OpenAI
 from openai import APIError, APIConnectionError, RateLimitError
 
 from agent import interactive
-from agent.tools import ALL_TOOLS, get_bash_tool
+from agent.tools import ALL_TOOLS
 
 # ============================================================
 # 常量
@@ -203,6 +203,7 @@ def run(
     max_steps: int = 10,
     bash_safety_mode: str = "auto",
     stream: bool = False,
+    tools: dict | None = None,
 ) -> str:
     """
     执行单轮 ReAct 循环：思考 → 行动 → 观察 → 再思考，直到任务完成。
@@ -214,6 +215,9 @@ def run(
         bash_safety_mode: Bash 安全模式 —— 'auto'（直接执行）或 'plan'（先收集后确认执行）。
         stream:           是否流式输出 —— True 时 LLM 回复与工具调用过程
                           实时打印到控制台，便于观察与随时中断。
+        tools:            本循环可用的工具注册表（name → BaseTool 实例）。
+                          None = 全局 ALL_TOOLS。子 agent 用它注入受限工具集，
+                          隔离能力边界（如去掉 task 工具防递归派发）。
 
     返回:
         模型的最终文本回复；如因异常提前终止则返回错误描述。
@@ -227,6 +231,7 @@ def run(
         bash_safety_mode=bash_safety_mode,
         max_steps=max_steps,
         stream=stream,
+        tools=tools,
     )
 
 
@@ -324,6 +329,7 @@ def _run_loop(
     bash_safety_mode: str = "auto",
     max_steps: int = 10,
     stream: bool = False,
+    tools: dict | None = None,
 ) -> str:
     """
     单轮 ReAct 循环核心：在给定的消息列表上持续调用 LLM，直到任务完成。
@@ -334,14 +340,20 @@ def _run_loop(
         bash_safety_mode: Bash 安全模式 —— 'auto'（直接执行）或 'plan'（先收集后确认执行）。
         max_steps:        最大工具调用次数（硬上限，防止死循环）。
         stream:           是否流式输出 —— True 时实时打印 LLM 文本与工具调用过程。
+        tools:            可用工具注册表，None = 全局 ALL_TOOLS（见 run()）。
 
     返回:
         模型的最终文本回复；如因异常提前终止则返回错误描述。
     """
     # ---- 0. 设置 bash 安全模式并生成工具 schema ----
-    bash_tool = get_bash_tool()
-    bash_tool.mode = bash_safety_mode
-    tool_schemas = [tool.to_openai_function() for tool in ALL_TOOLS.values()]
+    # 用注册表里的 bash 实例设 mode，而非全局单例 —— 子 agent 注入的是独立
+    # BashTool 实例，若仍写全局单例会把它翻成 auto 并清空父循环已收集的 plan。
+    # 注册表里没有 bash（纯受限工具集）时跳过，无害。
+    registry = ALL_TOOLS if tools is None else tools
+    bash_tool = registry.get("bash")
+    if bash_tool is not None:
+        bash_tool.mode = bash_safety_mode
+    tool_schemas = [tool.to_openai_function() for tool in registry.values()]
 
     step = 0
 
@@ -440,7 +452,7 @@ def _run_loop(
                     )
 
                 # 3c. 查找并执行工具
-                tool = ALL_TOOLS.get(tool_name)
+                tool = registry.get(tool_name)
                 if tool is None:
                     tool_result = f"错误：未知工具 —— {tool_name}"
                 else:
@@ -556,12 +568,15 @@ def run_interactive(
         )
 
     # clarify：对话循环——agent 返回普通文本问题后，等用户回答继续
+    # 澄清阶段不流式展示思考：中间推理与工具调用对用户是噪音，真正要暴露的
+    # 只有 ask_user 的问题（由工具自身 print_human 呈现）。故强制 stream=False，
+    # 忽略调用方传入的 stream 旗标；最终结论（[DONE]）由调用方负责呈现。
     for _ in range(max_rounds):
         result = _run_loop(
             messages,
             bash_safety_mode=bash_safety_mode,
             max_steps=max_steps,
-            stream=stream,
+            stream=False,
         )
 
         # agent 本轮结束（[DONE]/错误/中断/空）→ 对话结束

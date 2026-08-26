@@ -202,8 +202,10 @@ def run_qa(question: str, safety_mode: str, stream: bool) -> None:
         bash_safety_mode=safety_mode,
         stream=stream,
     )
-    if not interactive.is_terminal(result):
-        console.print(result, markup=False)
+    # 直接回答必须始终展示：result 以 [DONE] 开头（terminal），澄清阶段不流式
+    # 后需显式打印，否则回答会被吞。剥掉协议前缀 [DONE] 再显示给用户。
+    answer = result.removeprefix("[DONE]").strip()
+    console.print(answer, markup=False)
 
 
 def _confirm_requirements(safety_mode: str, stream: bool) -> None:

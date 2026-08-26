@@ -8,6 +8,7 @@ from agent.tools.bash import BashTool
 from agent.tools.triage import ListIssuesTool, SetIssueStatusTool
 from agent.tools.tickets import AllocateIssueTool
 from agent.tools.interact import AskUserTool, CheckpointTool
+from agent.tools.task import TaskTool
 
 # 按名称索引的工具实例
 ALL_TOOLS: dict[str, BaseTool] = {}
@@ -51,3 +52,6 @@ _register(AllocateIssueTool())
 
 _register(AskUserTool())
 _register(CheckpointTool())
+
+# task 最后注册 —— 它延迟依赖 agent.loop，而 loop 依赖本注册表
+_register(TaskTool())
