@@ -1,20 +1,26 @@
-"""运行上下文 —— 每次运行的独立工作区与输出转录。
+"""运行上下文 —— 转录目录管理 + 目标项目的产物定位。
 
-所有产物（spec.md、生成的代码）集中在 runs/<时间戳>/ 下；
-agent 在终端实时显示的流式输出（思考、工具调用、结果、错误）同步写入
-该目录的 session.log —— 运行结束后打开它，就能回看 agent 全程做了什么、
-出了什么问题，方便定位和修改。
+v2.3 锚定模型下的职责划分：
+    - 目标项目的产物（spec.md、.scratch/、生成的代码）落在目标项目里
+      （见 agent.paths.target_root），本模块只做路径定位；
+    - wz-agent 自己的观测记录（session.log 流式回放）留在 wz-agent 的
+      runs/ 下，不污染目标项目；目录名带目标项目 slug，多项目可分辨。
+
+运行结束后打开 runs/<时间戳>_<项目名>/session.log，就能回看 agent 全程
+做了什么、出了什么问题，方便定位和修改。
 """
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import TextIO
 
+from agent import paths
 from agent.paths import PROJECT_ROOT
 
-# runs/ 根目录（固定在项目根下）
+# runs/ 根目录（固定在 wz-agent 项目根下）
 RUNS_DIR: Path = PROJECT_ROOT / "runs"
 
 # 当前运行目录（start_run 设置，未设置时惰性创建）
@@ -24,24 +30,29 @@ _current: Path | None = None
 _transcript: TextIO | None = None
 
 
-def start_run(existing: Path | None = None) -> Path:
-    """创建本次运行的独立目录 runs/<时间戳>/，或复用指定目录（调试场景）。
+def _slugify(name: str) -> str:
+    """把目标项目目录名压成可放进目录名的 slug（Windows 安全字符）。"""
+    slug = re.sub(r"[^0-9A-Za-z_-]+", "-", name).strip("-")
+    return slug[:30]
 
-    参数:
-        existing: 若指定，直接复用该目录（不新建、不删除已有 spec/output），
-                  session.log 改为追加写入——用于调试 agent 时沿用之前生成的产物。
+
+def start_run(existing: Path | None = None) -> Path:
+    """创建本次运行的转录目录，或复用指定目录（调试场景）。
+
+    目录名：runs/<时间戳>_<目标项目名>/ —— 转录按项目可分辨。
+    v2.3 起 runs/ 下只有 session.log（代码与 spec 都直接落目标项目），
+    不再创建 output/ 沙箱。
     """
     global _current, _transcript
     if existing is not None:
         _current = existing
         _current.mkdir(parents=True, exist_ok=True)
-        (_current / "output").mkdir(exist_ok=True)
         _transcript = open(_current / "session.log", "a", encoding="utf-8", errors="replace")
         return _current
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    _current = RUNS_DIR / ts
+    slug = _slugify(paths.target_root().name)
+    _current = RUNS_DIR / (f"{ts}_{slug}" if slug else ts)
     _current.mkdir(parents=True, exist_ok=True)
-    (_current / "output").mkdir(exist_ok=True)
     _transcript = open(_current / "session.log", "w", encoding="utf-8", errors="replace")
     return _current
 
@@ -55,13 +66,8 @@ def current() -> Path:
 
 
 def spec_path() -> Path:
-    """本次运行的 spec.md 路径。"""
-    return current() / "spec.md"
-
-
-def output_dir() -> Path:
-    """本次运行生成的代码目录。"""
-    return current() / "output"
+    """spec.md 路径 —— 目标项目根下（spec 是项目工件，随项目走）。"""
+    return paths.target_root() / paths.SPEC_FILENAME
 
 
 def write_transcript(text: str) -> None:

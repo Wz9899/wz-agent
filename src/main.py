@@ -1,11 +1,12 @@
 """wz-agent 入口脚本。
 
 用法:
-    # 交互会话（默认）：单循环 REPL，需求澄清 → /code 编码 → 修改反馈
-    python src/main.py
-    python src/main.py "帮我写一个猜人游戏"        # 带任务播种进会话
+    # 目标项目 = 启动时所在目录（或 -C 显式指定）
+    python src/main.py                     # 交互会话（单循环 REPL）
+    python src/main.py -C ../my-project    # 锚定目标项目后进会话
+    python src/main.py "帮我写一个猜人游戏"    # 带任务播种进会话
 
-    # issue 分诊（triage 状态机）/ 任务拆解（spec → 垂直切片 tickets）
+    # issue 分诊 / 任务拆解（同样是目标项目上的 headless 流程）
     python src/main.py triage <feature-slug 或 issue 文件路径>
     python src/main.py to-tickets <feature-slug 或 spec 文件路径>
 
@@ -22,17 +23,16 @@ from dotenv import load_dotenv
 from rich.console import Console
 from rich.panel import Panel
 
-# 把 src 加入路径（支持从项目根目录运行）
-# 同时把工作目录锚定到项目根 —— 所有相对路径（工具 write/read、spec.md、
-# .scratch/）都以项目根为基准，从任何目录启动行为一致。
-# 注意：此处的 PROJECT_ROOT 必须在 import agent 之前算好（sys.path 需要它），
-# 故不复用 agent.paths.PROJECT_ROOT；两者指向同一目录。
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT / "src"))
-os.chdir(PROJECT_ROOT)
+# 启动时的工作目录 —— 未指定 -C 时作为默认目标项目（必须在任何 chdir 之前捕获）
+LAUNCH_CWD: Path = Path.cwd()
 
-from agent import interactive, issues, runtime
-from agent.context import spec_exists
+# wz-agent 自身根：sys.path 与 .env 的定位基准。
+# 注意：v2.3 起不再 chdir 到这里 —— 目标项目在 main() 里通过 paths.set_target 锚定，
+# 工具（read/write/edit/bash）的相对路径全部随目标项目走。
+PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+
+from agent import interactive, issues, paths, runtime
 from agent.loop import run_with_retry
 from agent.session import run_interactive_session
 from agent.prompts import (
@@ -41,7 +41,7 @@ from agent.prompts import (
     build_system_prompt,
 )
 
-load_dotenv()
+load_dotenv(PROJECT_ROOT / ".env")  # .env 固定在 wz-agent 根（与 cwd 无关）
 console = Console()
 
 # v2.0 子命令保留字（出现在第一个位置参数时走对应流程）
@@ -161,6 +161,12 @@ def _run_to_tickets(target: str, safety_mode: str, stream: bool) -> None:
 @click.command()
 @click.argument("args", nargs=-1, required=False)
 @click.option(
+    "-C", "--cd", "target",
+    type=click.Path(path_type=Path, exists=True, file_okay=False),
+    default=None,
+    help="目标项目目录（agent 直接在其中工作；默认：启动时所在目录）",
+)
+@click.option(
     "-s", "--safety-mode",
     type=click.Choice(["auto", "plan"]),
     default="auto",
@@ -188,6 +194,7 @@ def _run_to_tickets(target: str, safety_mode: str, stream: bool) -> None:
 )
 def main(
     args: tuple[str, ...],
+    target: Path | None,
     safety_mode: str,
     no_stream: bool,
     no_interactive: bool,
@@ -195,10 +202,17 @@ def main(
 ) -> None:
     """wz-agent — 通用编码助手：主动追问需求，自动生成代码。"""
 
+    # ---- 0. 锚定目标项目（相对路径基于启动时目录解析）----
+    try:
+        anchored = paths.set_target(target if target is not None else LAUNCH_CWD)
+    except FileNotFoundError as e:
+        console.print(Panel.fit(f"[bold red]{e}[/]", title="wz-agent"))
+        raise SystemExit(1)
+
     args = list(args)
     stream = not no_stream
 
-    # ---- 0. v2.0 子命令分发（triage / to-tickets，全自动 headless）----
+    # ---- 1. v2.0 子命令分发（triage / to-tickets，全自动 headless）----
     if args and args[0] in SUBCOMMANDS:
         sub = args.pop(0)
         if not args:
@@ -220,15 +234,16 @@ def main(
     if not _check_api_key():
         raise SystemExit(1)
 
-    # ---- 1. 任务参数：播种进交互会话（单循环 REPL，模型自路由）----
+    # ---- 2. 任务参数：播种进交互会话（单循环 REPL，模型自路由）----
     task = " ".join(args).strip() if args else None
     if not no_interactive:
+        console.print(f"[cyan]目标项目: {anchored}[/]")
         run_interactive_session(
             safety_mode=safety_mode, stream=stream, run_dir=run_opt, seed=task,
         )
         return
 
-    # ---- 2. headless 一次性模式（--no-interactive + 任务参数）----
+    # ---- 3. headless 一次性模式（--no-interactive + 任务参数）----
     # 脚本化场景：不进 REPL，用基座提示跑一轮带自动修复的循环到完成
     if not task:
         console.print(

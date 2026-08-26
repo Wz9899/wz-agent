@@ -1,6 +1,6 @@
 """triage 工具 —— issue 列表查看与状态更新（分诊状态机）。"""
 
-from agent import issues
+from agent import issues, paths
 from agent.tools.base import BaseTool
 
 
@@ -35,7 +35,7 @@ class ListIssuesTool(BaseTool):
         lines = [f"feature '{feature}' 共 {len(files)} 个 issue:"]
         for p in files:
             status = issues.get_status(p) or "(无 Status 行)"
-            rel = p.relative_to(issues.PROJECT_ROOT)
+            rel = p.relative_to(paths.target_root())
             lines.append(f"  [{p.stem}] {rel} —— Status: {status}")
         return "\n".join(lines)
 

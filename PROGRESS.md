@@ -64,6 +64,8 @@
 | Windows bash 修复 | `tools/bash.py` — Windows 下用 git-bash 执行（临时脚本法），POSIX 语法不再撞 cmd 墙 | ✅ 已验证 |
 | 单循环会话重构 | `prompts/base.py` + `loop.py:continue_turn` + `session.py` 重写 —— 删意图分类器与三层会话，澄清/编码/修改在同一对话模型自路由；[DONE] 协议退役 | ✅ 129 测试全绿 |
 | 播种会话 | `main.py` —— 命令行任务参数直接进 REPL（pi 式），删 --phase；--no-interactive 保留 headless 出口 | ✅ |
+| 目标项目锚定 | `paths.set_target` + `main.py -C` —— agent 直接在目标项目工作，spec/.scratch/落目标根；runs/ 只留转录（目录名带项目名）；删 output/ 沙箱 | ✅ |
+| git 边界 | harness 零 git 调用；agent 可读不可写（prompt 级）；/clear 只删 spec 不碰项目文件 | ✅ 133 测试全绿 |
 
 ## 待完成
 
@@ -75,8 +77,8 @@
 | 版本 | 功能 | 状态 |
 |---|---|---|
 | v2.1 | 子 agent 派发（task 工具）+ Windows bash 修复 | ✅ |
-| v2.2 | 单循环会话重构：删意图分类器，基座提示模型自路由（本轮） | ✅ |
-| v2.3 | git 还原点（运行边界自动 commit）+ 目标仓库锚定 | 📋 |
+| v2.2 | 单循环会话重构：删意图分类器，基座提示模型自路由 | ✅ |
+| v2.3 | 目标项目锚定（-C + set_target，删 output/ 沙箱）+ git 边界（harness 零 git） | ✅ |
 | v2.4 | task 工具并行扇出 + 工具实例工厂化（修共享单例竞态） | 📋 |
 | v2.5 | triage 批量评论模板、ticket ↔ code 自动衔接 | 📋 |
 

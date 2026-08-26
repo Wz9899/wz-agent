@@ -15,7 +15,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from agent.paths import PROJECT_ROOT, SCRATCH_DIRNAME
+from agent import paths
+from agent.paths import SCRATCH_DIRNAME
 
 # 五个标准 triage 标签（与 docs/agents/triage-labels.md 保持一致）
 VALID_LABELS: tuple[str, ...] = (
@@ -36,8 +37,8 @@ _STATUS_RE = re.compile(r"^Status:\s*(.+?)\s*$", re.MULTILINE)
 
 
 def scratch_root() -> Path:
-    """返回 .scratch/ 根目录路径。"""
-    return PROJECT_ROOT / SCRATCH_DIRNAME
+    """返回 .scratch/ 根目录路径（目标项目根下）。"""
+    return paths.target_root() / SCRATCH_DIRNAME
 
 
 def feature_dir(slug: str) -> Path:
@@ -259,9 +260,9 @@ def resolve_spec_target(target: str) -> tuple[str, Path]:
     if sp.is_file():
         return target, sp
 
-    # fallback：feature 级 spec 不存在时，回退到项目根 spec.md
-    # （v1.0 澄清阶段把 spec 写到项目根，v2.0 拆解阶段也应收得到这份 spec）
-    root_spec = PROJECT_ROOT / "spec.md"
+    # fallback：feature 级 spec 不存在时，回退到目标项目根 spec.md
+    # （澄清阶段把 spec 写到项目根，拆解阶段也应收得到这份 spec）
+    root_spec = paths.target_root() / "spec.md"
     if root_spec.is_file():
         return target, root_spec
 

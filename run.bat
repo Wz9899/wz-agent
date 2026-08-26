@@ -4,9 +4,13 @@ echo ========================================
 echo   wz-agent - coding assistant
 echo ========================================
 echo.
-echo Enter your requirement below (press Enter):
+set /p TARGET=Target project dir (Enter = current wz-agent dir):
 echo.
-python src\main.py
+if "%TARGET%"=="" (
+    python src\main.py %*
+) else (
+    python src\main.py -C "%TARGET%" %*
+)
 echo.
 echo Done. Press any key to close.
 pause >nul

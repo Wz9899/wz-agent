@@ -2,7 +2,7 @@
 
 一个从零手搓的通用编码助手——主动追问需求，自动生成代码。
 
-> ✅ 当前版本：v2.2 — 单循环会话重构（删意图分类器，模型自路由）
+> ✅ 当前版本：v2.3 — 目标项目锚定（agent 直接在你的项目里工作）
 
 ## 功能规划
 
@@ -17,7 +17,8 @@
 | v2.0 | triage（issue 分诊）+ to-tickets（任务拆解） | ✅ |
 | v2.1 | 子 agent 派发（task 工具，LLM 自主决策）+ Windows bash 修复 | ✅ |
 | v2.2 | 单循环会话重构：删意图分类器，基座提示模型自路由 | ✅ |
-| v2.3 | ticket ↔ code 阶段自动衔接 | 📋 |
+| v2.3 | 目标项目锚定（-C，删 output/ 沙箱）+ git 边界（harness 零 git） | ✅ |
+| v2.4 | ticket ↔ code 阶段自动衔接 | 📋 |
 
 ## 技术栈
 
@@ -69,20 +70,20 @@ cp .env.example .env   # 然后编辑 .env 填入 Key
 ### 3. 运行
 
 ```bash
-# 最简方式：不传任务，启动后实时输入你的需求（run.bat 即此模式）
-python src/main.py
+# 锚定目标项目后进入会话（agent 直接在该项目里工作；默认目标 = 启动时所在目录）
+python src/main.py -C /path/to/your-project
 
 # 或直接把任务写进命令（播种进会话，后续照常对话）
-python src/main.py "帮我写一个猜人游戏"
+python src/main.py -C /path/to/your-project "帮我加一个计分功能"
 
 # 会话内：说需求 → agent 逐轮问清写 spec.md → 输入 /code 开始编码
 #         → 直接说修改意见，agent 精准修改 —— 全程同一个对话上下文
 
 # issue 分诊（triage 状态机，五档标签，全自动）
-python src/main.py triage <feature-slug 或 issue 文件路径>
+python src/main.py -C /path/to/your-project triage <feature-slug 或 issue 文件路径>
 
 # 任务拆解（spec → 垂直切片 tickets，全自动）
-python src/main.py to-tickets <feature-slug 或 spec 文件路径>
+python src/main.py -C /path/to/your-project to-tickets <feature-slug 或 spec 文件路径>
 
 # headless：不进会话，带任务参数一次性跑完（脚本化场景）
 python src/main.py "帮我写一个猜人游戏" --no-interactive
@@ -111,6 +112,14 @@ python src/main.py "帮我写一个猜人游戏" --safety-mode plan
 人工确认后批量执行。在 **auto 模式**下命令直接执行，安全完全依赖模型自律。
 **不要**在含重要数据的环境用 auto 模式运行不受信任的任务。
 
+### git 边界（v2.3）
+
+- harness **零 git**：wz-agent 的 Python 代码不执行任何 git 命令，对任意目录可用
+- agent 经 bash **可读不可写**（提示词级约束）：查 `git status/log/diff` 理解项目
+  允许；`commit/push/reset/checkout` 等写操作不做
+- 版本控制、快照、回滚完全由你自己管理——**agent 动手前自己 commit 一下**
+  就是最好的还原点；`/clear` 只删 spec.md 与对话历史，绝不碰项目文件
+
 ## 项目结构
 
 ```
@@ -122,7 +131,7 @@ wz-agent/
 ├── .env.example            # 环境变量模板（复制为 .env）
 ├── test_api.py             # API 连通性测试
 ├── examples/nba-wordle/    # 示例项目：agent 生成的 NBA 猜球员游戏
-├── runs/                   # 每次运行的工作区：<时间戳>/ 下 spec.md + output/ + session.log
+├── runs/                   # wz-agent 自己的观测记录：<时间戳>_<项目名>/session.log（产物在目标项目里，不在这）
 ├── .scratch/               # 本地 issue tracker（issue-tracker.md 约定）
 │   └── <feature-slug>/
 │       ├── spec.md         # 该 feature 的需求规格

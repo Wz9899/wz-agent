@@ -7,7 +7,7 @@ Status 行读写、CLI 目标解析。所有文件系统操作都重定向到 py
 
 import pytest
 
-from agent import issues
+from agent import issues, paths
 
 
 # ---------- 辅助 & 隔离 ----------
@@ -24,8 +24,8 @@ def _make_feature(slug: str = "demo", files: tuple[str, ...] = ()) -> None:
 
 @pytest.fixture(autouse=True)
 def _isolate_scratch(tmp_path, monkeypatch):
-    """把 PROJECT_ROOT 重定向到临时目录，使 .scratch/ 落在临时目录下。"""
-    monkeypatch.setattr(issues, "PROJECT_ROOT", tmp_path)
+    """把目标项目重定向到临时目录，使 .scratch/ 与根 spec 落在临时目录下。"""
+    monkeypatch.setattr(paths, "TARGET_ROOT", tmp_path)
 
 
 # ---------- list_issue_files ----------
@@ -180,8 +180,8 @@ def test_resolve_spec_target_feature_spec():
 
 
 def test_resolve_spec_target_root_spec_fallback():
-    # feature 级 spec 缺失时回退到项目根 spec.md
-    root = issues.PROJECT_ROOT / "spec.md"
+    # feature 级 spec 缺失时回退到目标项目根 spec.md
+    root = paths.target_root() / "spec.md"
     root.write_text("# spec", encoding="utf-8")
     feature, path = issues.resolve_spec_target("demo")
     assert feature == "demo"

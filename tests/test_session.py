@@ -10,13 +10,14 @@ from pathlib import Path
 
 import pytest
 
-from agent import interactive, runtime, session
+from agent import interactive, paths, runtime, session
 
 
 @pytest.fixture(autouse=True)
 def _isolate_run_dir(tmp_path, monkeypatch):
-    """把 runs/ 重定向到临时目录，并重置运行上下文，避免测试相互污染。"""
+    """runs/ 与目标项目都重定向到临时目录，避免测试相互污染。"""
     monkeypatch.setattr(runtime, "RUNS_DIR", tmp_path)
+    monkeypatch.setattr(paths, "TARGET_ROOT", tmp_path)  # spec/项目文件落临时目录
     runtime.start_run()  # 重置 _current 指向当前测试的临时目录
 
 
@@ -108,10 +109,10 @@ def test_messages_persist_across_turns(monkeypatch):
 
 
 def test_system_prompt_contains_runtime_paths():
-    """系统提示含本次运行的 spec.md 与 output/ 绝对路径（权威声明）。"""
+    """系统提示含目标项目根与 spec.md 绝对路径（权威声明）。"""
     prompt = session.build_system_prompt()
+    assert str(paths.target_root()) in prompt
     assert str(runtime.spec_path()) in prompt
-    assert str(runtime.output_dir()) in prompt
 
 
 def test_seed_runs_first_turn(monkeypatch):
@@ -128,12 +129,9 @@ def test_seed_runs_first_turn(monkeypatch):
     assert seen == ["帮我写一个猜人游戏"]
 
 
-def test_seed_message_on_reused_run_dir(monkeypatch):
-    """--run 复用已有 spec 的目录时，播种现状消息（不跑模型）。"""
+def test_seed_message_on_reused_target(monkeypatch):
+    """目标项目已有 spec.md 时，播种现状消息（不跑模型）。"""
     runtime.spec_path().write_text("# spec", encoding="utf-8")
-    out = runtime.output_dir()
-    out.mkdir(parents=True, exist_ok=True)
-    (out / "game.js").write_text("// x", encoding="utf-8")
 
     _feed(monkeypatch, "继续", "/exit")
     captured: dict[str, list] = {}
@@ -145,8 +143,8 @@ def test_seed_message_on_reused_run_dir(monkeypatch):
     monkeypatch.setattr(session, "continue_turn", fake)
     session.run_interactive_session()
 
-    # 播种消息在历史里（read spec 指引 + 已有文件清单），且未消耗模型轮次
-    assert any("spec.md" in c and "game.js" in c for c in captured["users"])
+    # 播种消息在历史里（read spec 指引），且未消耗模型轮次
+    assert any("spec.md" in c for c in captured["users"])
 
 
 # ---------- 斜杠命令 ----------
@@ -199,12 +197,11 @@ def test_unknown_command_hint(monkeypatch):
     assert any("未知命令" in x for x in printed)
 
 
-def test_clear_resets_history_and_files(monkeypatch):
-    """/clear 删除 spec/output，并重置对话历史（防旧讨论误导模型）。"""
+def test_clear_resets_history_keeps_project_files(monkeypatch):
+    """/clear 只删 spec + 重置对话；项目文件绝不动（回滚是用户的 git 的事）。"""
     runtime.spec_path().write_text("# spec", encoding="utf-8")
-    out = runtime.output_dir()
-    out.mkdir(parents=True, exist_ok=True)
-    (out / "game.js").write_text("// x", encoding="utf-8")
+    game = paths.target_root() / "game.js"
+    game.write_text("// 项目里的代码", encoding="utf-8")
 
     _feed(monkeypatch, "帮我写游戏", "/clear", "y", "再来一个", "/exit")
     total_lengths: list[int] = []
@@ -218,8 +215,8 @@ def test_clear_resets_history_and_files(monkeypatch):
     monkeypatch.setattr(session, "continue_turn", fake)
     session.run_interactive_session()
 
-    assert not runtime.spec_path().exists()
-    assert not (out / "game.js").exists()
+    assert not runtime.spec_path().exists()   # spec 已删
+    assert game.exists()                      # 项目文件保留！
     # 第 1 轮开局 = system + 播种消息（spec 已存在时注入现状）；
     # /clear 重置后第 2 轮只剩 system —— 历史确实被清了
     assert total_lengths == [2, 1]

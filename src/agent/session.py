@@ -40,7 +40,7 @@ _EXIT_WORDS = frozenset({"exit", "quit", "q", "退出"})
 # /code 命令的提示词译文：把用户显式意图翻译成对话输入，而非路由分支
 _CODE_COMMAND_INPUT = (
     "（用户命令 /code）请按 spec.md 开始编码实现。"
-    "output/ 已有文件时先 read 现状，增量开发。"
+    "项目里已有代码时先 read 现状，增量开发。"
 )
 
 
@@ -49,7 +49,7 @@ def _print_help() -> None:
     console.print("  [bold]/help[/]   显示本帮助")
     console.print("  [bold]/spec[/]   查看当前 spec.md 内容")
     console.print("  [bold]/code[/]   开始编码执行（按 spec.md 实现）")
-    console.print("  [bold]/clear[/]  清空本次运行的代码和 spec（重新开始）")
+    console.print("  [bold]/clear[/]  删除 spec.md 并重置对话（项目文件不动；代码回滚自己用 git）")
     console.print("  [bold]/exit[/]   退出会话（或输入 exit / q / Ctrl-C）")
     console.print("")
     console.print("直接输入:")
@@ -58,39 +58,39 @@ def _print_help() -> None:
     console.print("  [bold]<提问>[/]      直接回答，不写文件")
 
 
-def _clear_outputs() -> None:
-    """清空本次运行的代码与 spec，重新开始（需确认）。"""
+def _clear_session() -> None:
+    """删除 spec.md 并重置对话（需确认）。
+
+    项目里的代码文件**绝不动**——那是用户用自己的 git 管理的事；
+    本命令只重置 wz-agent 自己的状态（spec + 对话历史）。
+    """
     try:
-        confirm = interactive.prompt_human("确认清空本次运行的代码和 spec.md？[y/N] > ")
+        confirm = interactive.prompt_human(
+            "删除 spec.md 并重置对话历史？项目文件不会动 [y/N] > "
+        )
     except (EOFError, KeyboardInterrupt):
         console.print("\n[yellow]已取消。[/]")
         return
     if confirm.lower() != "y":
         console.print("[yellow]已取消。[/]")
         return
-    import shutil
-    out = runtime.output_dir()
-    if out.is_dir():
-        shutil.rmtree(out)
     spec = runtime.spec_path()
     if spec.is_file():
         spec.unlink()
-    console.print("[yellow]已清空本次运行的代码和 spec.md，可以开始新需求。[/]")
+    console.print(
+        "[yellow]已删除 spec.md（如有）并重置对话。项目文件未动——"
+        "代码回滚请用自己的 git。[/]"
+    )
 
 
 def _seed_message() -> str:
-    """--run 复用旧目录时的现状播种消息（只告知，不跑模型）。"""
+    """目标项目已有 spec.md 时的现状播种消息（只告知，不跑模型）。"""
     if not spec_exists():
         return ""
-    out_dir = runtime.output_dir()
-    files = sorted(p.name for p in out_dir.iterdir() if p.is_file()) if out_dir.is_dir() else []
-    note = (
-        f"（会话恢复）本次运行沿用已有目录。spec.md 已存在"
-        f"（{runtime.spec_path()}），请先 read 它了解需求。"
+    return (
+        f"（会话恢复）目标项目根已存在 spec.md（{runtime.spec_path()}），"
+        f"请先 read 它了解需求；项目现状自行用 read/ls 探索后再动手。"
     )
-    if files:
-        note += f"output/ 已有文件：{', '.join(files)}。修改前先 read 现状。"
-    return note
 
 
 def run_interactive_session(
@@ -104,7 +104,7 @@ def run_interactive_session(
     参数:
         safety_mode: Bash 安全模式 —— 'auto' 或 'plan'。
         stream:      是否流式输出（实时打印思考与工具调用）。
-        run_dir:     可选，复用指定运行目录（沿用之前的 spec/代码）。
+        run_dir:     可选，复用指定转录目录（调试时沿用之前的 session.log）。
         seed:        可选，初始用户输入（命令行任务参数播种进会话，
                      相当于 pi 的"带任务启动会话"）。
     """
@@ -165,8 +165,8 @@ def run_interactive_session(
             if cmd == "/help":
                 _print_help()
             elif cmd == "/clear":
-                _clear_outputs()
-                # 清空后重置对话：spec/output 已不存在，历史里的旧讨论会误导模型
+                _clear_session()
+                # 清空后重置对话：spec 已不存在，历史里的旧讨论会误导模型
                 messages[:] = [messages[0]]
                 console.print("[yellow]已重置对话历史。[/]")
             elif cmd == "/spec":

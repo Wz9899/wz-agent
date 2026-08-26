@@ -20,7 +20,7 @@ Agent 主动追问用户需求（ask_user 阻塞式，一轮一个聚焦问题�
 用户 /code 或明确要求后，Agent 根据 spec.md 编码实现：分模块自主执行、checkpoint 汇报不停顿、写完即测、错误自修。开始后不再 ask_user。
 
 **修改反馈（会话内模式三）**：
-output/ 已有代码时，用户直接说修改意见；Agent 先 read 现状，用 edit 精准修改，绝不 write 重写整个文件。
+项目里已有代码时，用户直接说修改意见；Agent 先 read 现状，用 edit 精准修改，绝不 write 重写整个文件。
 
 **Spec 文档**：
 需求澄清的输出物，自由格式的自然语言描述完整需求（游戏玩法、规则、技术栈等）。是编码执行的唯一权威输入；对话历史被压缩后，Agent 靠重读 spec.md 恢复状态（文件即状态）。
@@ -48,6 +48,10 @@ Agent 可调用的四个基础能力：
 - **计划模式** — agent 列出命令清单，用户确认后批量执行，适合高风险操作
 _Avoid_: 无限制直接执行
 
-**还原点（restore point，规划中）**：
-harness 在运行边界（agent 动手前、跑完后）自动 `git commit` 打下的版本标记。它不是 agent 的工具——agent 不感知、不调用，由运行时自动创建。三个用途：diff 看清 agent 改了什么、reset 一键回滚坏改动、log 回看历史。跨会话状态由还原点 + 文件系统承担，不建独立记忆系统。agent 自己要用 git 时走 bash 工具，与还原点无关（机制是 harness 的，命令是 agent 的）。
-_Avoid_: 做成 agent 工具（如 snapshot / git_commit）；称"git 快照"或"项目快照"——名字以 git 开头会被误读成可调用工具，与 bash 里跑 git 命令混淆
+**git 边界（v2.3 决策）**：
+harness 零 git —— Python 代码不执行任何 git 命令，对任意目录可用；agent 经 bash 可读不可写（查 status/log/diff 帮助理解项目允许，commit/push/reset/checkout 等写操作禁止，prompt 级软约束）；版本控制、快照、回滚完全由用户自己用 git 管理，/clear 绝不碰项目文件。
+_Avoid_: 自动 commit/还原点/权限弹窗类"安全功能"——那是用户的部署决策，不是产品功能（与 pi 立场一致）。
+
+**目标项目（target，v2.3）**：
+agent 直接在其上工作的项目目录，`-C` 显式指定或默认取启动时所在目录（`paths.set_target` 锚定 + chdir）。spec.md、.scratch/、生成的代码全部落在目标项目里；wz-agent 自己只保留 runs/ 转录（目录名带项目名，不含任何产物）。
+_Avoid_: 重新引入 runs/<ts>/output/ 沙箱 —— 那会把 wz-agent 退化回"项目生成器"。
