@@ -66,6 +66,9 @@
 | 播种会话 | `main.py` —— 命令行任务参数直接进 REPL（pi 式），删 --phase；--no-interactive 保留 headless 出口 | ✅ |
 | 目标项目锚定 | `paths.set_target` + `main.py -C` —— agent 直接在目标项目工作，spec/.scratch/落目标根；runs/ 只留转录（目录名带项目名）；删 output/ 沙箱 | ✅ |
 | 进度文档（项目快照） | `base.py` prompt 纪律 + `/progress` 命令 —— 编码时同步维护目标项目 PROGRESS.md，会话启动先读它接上进度；跨会话状态 = spec + PROGRESS，零记忆机制 | ✅ |
+| 工具工厂 | `tools/__init__.py` —— TOOL_CLASSES 目录 + make_tools() 每循环全新实例，删 ALL_TOOLS 单例；plan 生命周期对齐一次 _run_loop | ✅ |
+| schema 类型修复 | `tools/base.py` —— eval_str 求值注解 + list→array + X\|None 解包（append 的 boolean 此前一直误判 string） | ✅ |
+| 并行扇出 | `tools/task.py` —— fan_out 线程池并行调查，按序聚合；只读护栏 + MAX_FAN_OUT=4；Ctrl-C 走中断菜单 | ✅ 144 测试全绿 |
 | git 边界 | harness 零 git 调用；agent 可读不可写（prompt 级）；/clear 只删 spec 不碰项目文件 | ✅ 136 测试全绿 |
 
 ## 待完成
@@ -80,7 +83,7 @@
 | v2.1 | 子 agent 派发（task 工具）+ Windows bash 修复 | ✅ |
 | v2.2 | 单循环会话重构：删意图分类器，基座提示模型自路由 | ✅ |
 | v2.3 | 目标项目锚定（-C + set_target，删 output/ 沙箱）+ git 边界（harness 零 git） | ✅ |
-| v2.4 | task 工具并行扇出 + 工具实例工厂化（修共享单例竞态） | 📋 |
+| v2.4 | 工具工厂化（修共享单例竞态）+ task 并行扇出（fan_out，只读护栏） | ✅ |
 | v2.5 | triage 批量评论模板、ticket ↔ code 自动衔接 | 📋 |
 
 ## 技术选型

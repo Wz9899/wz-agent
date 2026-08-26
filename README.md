@@ -18,7 +18,8 @@
 | v2.1 | 子 agent 派发（task 工具，LLM 自主决策）+ Windows bash 修复 | ✅ |
 | v2.2 | 单循环会话重构：删意图分类器，基座提示模型自路由 | ✅ |
 | v2.3 | 目标项目锚定（-C，删 output/ 沙箱）+ 进度文档 PROGRESS.md + git 边界（harness 零 git） | ✅ |
-| v2.4 | ticket ↔ code 阶段自动衔接 | 📋 |
+| v2.4 | 工具工厂化（修共享单例竞态）+ task 并行扇出（fan_out，只读护栏） | ✅ |
+| v2.5 | ticket ↔ code 阶段自动衔接 | 📋 |
 
 ## 技术栈
 

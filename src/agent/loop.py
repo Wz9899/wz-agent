@@ -11,7 +11,7 @@ from openai import OpenAI
 from openai import APIError, APIConnectionError, RateLimitError
 
 from agent import interactive
-from agent.tools import ALL_TOOLS
+from agent.tools import make_tools
 
 # ============================================================
 # 常量
@@ -216,7 +216,7 @@ def run(
         stream:           是否流式输出 —— True 时 LLM 回复与工具调用过程
                           实时打印到控制台，便于观察与随时中断。
         tools:            本循环可用的工具注册表（name → BaseTool 实例）。
-                          None = 全局 ALL_TOOLS。子 agent 用它注入受限工具集，
+                          None = make_tools() 现场构造全新实例。子 agent 用它注入受限工具集，
                           隔离能力边界（如去掉 task 工具防递归派发）。
 
     返回:
@@ -340,16 +340,16 @@ def _run_loop(
         bash_safety_mode: Bash 安全模式 —— 'auto'（直接执行）或 'plan'（先收集后确认执行）。
         max_steps:        最大工具调用次数（硬上限，防止死循环）。
         stream:           是否流式输出 —— True 时实时打印 LLM 文本与工具调用过程。
-        tools:            可用工具注册表，None = 全局 ALL_TOOLS（见 run()）。
+        tools:            可用工具集，None = make_tools() 现场构造（见 run()）。
 
     返回:
         模型的最终文本回复；如因异常提前终止则返回错误描述。
     """
-    # ---- 0. 设置 bash 安全模式并生成工具 schema ----
-    # 用注册表里的 bash 实例设 mode，而非全局单例 —— 子 agent 注入的是独立
-    # BashTool 实例，若仍写全局单例会把它翻成 auto 并清空父循环已收集的 plan。
-    # 注册表里没有 bash（纯受限工具集）时跳过，无害。
-    registry = ALL_TOOLS if tools is None else tools
+    # ---- 0. 构造本循环的工具集并设置 bash 安全模式 ----
+    # 不传 tools 时现场工厂构造：每个循环一份全新实例，bash 的 mode/_plan
+    # 生命周期 = 本次 _run_loop 调用（计划在实例内收集/执行，循环结束即弃）。
+    # 重试循环每次重调 _run_loop 也各自全新——失败轮次残留的计划不会泄漏。
+    registry = make_tools() if tools is None else tools
     bash_tool = registry.get("bash")
     if bash_tool is not None:
         bash_tool.mode = bash_safety_mode

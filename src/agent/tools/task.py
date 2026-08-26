@@ -4,7 +4,7 @@
 harness 在工具的 run() 里递归调用 agent 循环本身（loop.run），
 用全新的消息历史执行，只把最终回复作为工具结果返回主对话。
 
-三个关键设计：
+四个关键设计：
 1. 上下文隔离 —— 子 agent 只看到自己的 system prompt + 任务描述，
    看不到主对话历史；主 agent 只看到子 agent 的最终回复（天然是摘要），
    中间几十 KB 的工具输出不会占用主对话的上下文预算。
@@ -12,11 +12,16 @@ harness 在工具的 run() 里递归调用 agent 循环本身（loop.run），
    LLM 只能按名选用，不能自创角色。能力边界是工程决定。
 3. 禁止递归 —— 子 agent 的工具集不含 task 工具（注册表层面隔离），
    另加运行时深度守卫兜底（防未来配置失误）。
+4. 并行扇出（v2.4）—— fan_out 传多个子问题时线程池并行调查，
+   每线程独立 messages + 工厂全新工具实例（make_tools），互不共享
+   可变状态。仅对只读 agent 开放（工具集无 write/edit）——并行写
+   需要 worktree 隔离，那是更重的机制，暂不引入。
 """
 
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from agent.tools.base import BaseTool
 from agent.interactive import print_human
@@ -85,6 +90,12 @@ SUBAGENTS: dict[str, SubAgentDef] = {
 # 这里是第二道：万一未来某个子 agent 定义误含 task，运行时直接拒绝。
 _DEPTH: int = 0
 
+# 并行扇出的子问题上限（成本护栏：一次 tool_call 最多派几个并行子 agent）
+MAX_FAN_OUT: int = 4
+
+# 写工具名单（只读边界）：含写工具的 agent 并行会产生文件冲突
+_WRITE_TOOLS: frozenset[str] = frozenset({"write", "edit"})
+
 
 # ============================================================
 # task 工具
@@ -108,15 +119,21 @@ class TaskTool(BaseTool):
             "② 边界清晰、中间过程对当前对话无价值的编码子任务。"
             "用它可以避免大量工具输出占用主对话上下文。"
             f"可选角色: {roles}。"
+            "并行调查：只读角色可传 fan_out（多个子问题），各子 agent "
+            "线程池并行执行、上下文独立，结果按序聚合返回——一次摸清"
+            "互不依赖的多个面向时用它，比逐个串行问快得多。"
             "注意: 子 agent 看不到当前对话，task 必须自包含全部背景"
             "（目标、相关文件路径、约束、验收标准）。"
         )
 
-    def run(self, task: str, subagent: str) -> str:
+    def run(self, task: str, subagent: str, fan_out: list[str] | None = None) -> str:
         """执行子 agent 任务。
 
-        task: 自包含的任务描述（目标、相关路径、约束、验收标准）
+        task: 自包含的任务描述（目标、相关路径、约束、验收标准）；
+              fan_out 模式下作为所有子问题的共享背景
         subagent: 子 agent 名（investigator / coder）
+        fan_out: 并行子问题列表（仅只读 agent 可用），每个子问题一个独立
+                 子 agent 线程，结果按序聚合返回；None = 单任务串行
         """
         global _DEPTH
 
@@ -130,23 +147,106 @@ class TaskTool(BaseTool):
         if not task.strip():
             return "[ERR] task 不能为空 —— 请提供自包含的任务描述。"
 
-        # ---- 2. 解析工具集（运行时从全局注册表取，name → 实例）----
+        # ---- 2. 分发：并行扇出 or 单任务串行 ----
+        if fan_out:
+            return self._run_fan_out(task, spec, fan_out)
+        return self._run_single(task, spec)
+
+    def _run_fan_out(self, task: str, spec: "SubAgentDef", fan_out: list[str]) -> str:
+        """并行扇出：每个子问题一个独立子 agent，线程池执行，按序聚合。
+
+        线程安全前提（v2.4 工厂化）：每线程 make_tools() 全新实例，
+        bash 的 mode/_plan 等可变状态零共享。只读护栏保证并行无文件冲突。
+        """
+        global _DEPTH
+
+        # 只读护栏：含写工具的 agent 并行会互相踩文件，直接拒绝
+        writes = _WRITE_TOOLS & set(spec.tool_names)
+        if writes:
+            return (
+                f"[ERR] '{spec.name}' 有写权限（{sorted(writes)}），不允许并行 —— "
+                f"并行写需要工作目录隔离。请逐个串行派发，或不传 fan_out。"
+            )
+        if len(fan_out) > MAX_FAN_OUT:
+            return f"[ERR] fan_out 最多 {MAX_FAN_OUT} 个子问题（收到 {len(fan_out)} 个）。请拆分或精选。"
+
+        items = [i.strip() for i in fan_out if i and i.strip()]
+        n = len(items)
+        if n == 0:
+            return "[ERR] fan_out 为空（全是空白项）—— 请提供至少一个子问题。"
+
         # 延迟 import: loop.py 依赖 agent.tools（本模块），顶层 import 会循环依赖
         from agent.loop import run as loop_run
-        from agent.tools import ALL_TOOLS
-        from agent.tools.bash import BashTool
+        from agent.tools import make_tools
 
-        missing = [n for n in spec.tool_names if n not in ALL_TOOLS]
-        if missing:
-            return f"[ERR] 子 agent '{subagent}' 的工具配置失效（未注册: {missing}）。这是配置错误，请换其他方式完成。"
-        # bash 注入独立实例而非全局单例：隔离 _mode/_plan 状态，避免子循环的
-        # mode 切换把父循环已收集的执行计划清空/翻转（plan 模式下尤其致命）。
-        sub_tools = {
-            n: (BashTool() if n == "bash" else ALL_TOOLS[n])
-            for n in spec.tool_names
-        }
+        def _question(i: int) -> str:
+            """第 i 个子问题的完整任务：共享背景 + 具体子问题。"""
+            return (
+                f"{task}\n\n===== 本次只调查这个子问题（{i + 1}/{n}）=====\n{items[i]}"
+                f"\n（其余子问题由别的调查员并行负责，你不用管。）"
+            )
 
-        # ---- 3. 执行（子 agent 强制 auto 模式，用独立 bash 实例）----
+        def _work(i: int) -> str:
+            """线程体：全新工具实例 + 独立 messages 跑子循环。"""
+            return loop_run(
+                system_prompt=spec.system_prompt,
+                user_message=_question(i),
+                max_steps=spec.max_steps,
+                bash_safety_mode="auto",      # 子循环实际执行命令，不进 plan 收集
+                stream=False,
+                tools=make_tools(spec.tool_names),  # 工厂：每线程全新实例
+            )
+
+        print_human(f"\n  [task·并行] 启动 {n} 个 {spec.name}：")
+        for i, item in enumerate(items):
+            print_human(f"    {i + 1}. {item[:60]}")
+
+        results: list[str | None] = [None] * n
+        start = time.time()
+        _DEPTH += 1
+        try:
+            with ThreadPoolExecutor(max_workers=n) as pool:
+                futures = {pool.submit(_work, i): i for i in range(n)}
+                try:
+                    for fut in as_completed(futures):
+                        i = futures[fut]
+                        results[i] = fut.result()
+                        preview = (results[i] or "").strip().split("\n")[0][:80]
+                        print_human(f"  [task·并行] {i + 1}/{n} 完成: {preview}")
+                except KeyboardInterrupt:
+                    # Ctrl-C 在主线程抛出：取消未启动的、不等在跑的（只读子
+                    # agent 无副作用，让其自然收尾）。KI 继续上抛 → _run_loop
+                    # 的中断菜单接管（继续/注入/停止）。
+                    for f in futures:
+                        f.cancel()
+                    pool.shutdown(wait=False, cancel_futures=True)
+                    raise
+        finally:
+            _DEPTH -= 1
+
+        # ---- 聚合（按子问题原序，不按完成序）----
+        sections = []
+        for i, item in enumerate(items):
+            body = results[i] or "（无结果 —— 该子 agent 被中断或失败）"
+            sections.append(f"== 子问题 {i + 1}/{n}: {item[:80]} ==\n{body}")
+        print_human(f"  [task·并行] 全部完成（{time.time() - start:.0f}s），结果已聚合")
+        return f"并行调查结果（{n} 个子问题，按序）:\n\n" + "\n\n".join(sections)
+
+    def _run_single(self, task: str, spec: "SubAgentDef") -> str:
+        """单任务串行派发（v2.1 行为不变）。"""
+        global _DEPTH
+
+        # ---- 构造受限工具集（工厂：全新实例，无 task —— 递归结构性防线）----
+        # 延迟 import: loop.py 依赖 agent.tools（本模块），顶层 import 会循环依赖
+        from agent.loop import run as loop_run
+        from agent.tools import make_tools
+
+        try:
+            sub_tools = make_tools(spec.tool_names)
+        except ValueError as e:
+            return f"[ERR] 子 agent '{spec.name}' 的工具配置失效（{e}）。这是配置错误，请换其他方式完成。"
+
+        # ---- 执行（子 agent 强制 auto 模式，用独立 bash 实例）----
         # 不继承父循环的 plan 模式：子 agent 处于独立上下文，其命令应实际执行
         # （investigator 需读 bash 输出、coder 需跑验证）；独立实例已隔离状态，
         # 不会污染父循环的执行计划。

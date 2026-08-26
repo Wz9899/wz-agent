@@ -5,7 +5,7 @@
   - checkpoint(summary)：完成一个模块/阶段后停下汇报，用户确认后才继续。
 
 非交互模式（interactive.ENABLED=False）下两者都退化：返回提示文本，让 LLM
-自行做合理假设或继续，绝不阻塞。工具仍注册在 ALL_TOOLS（schema 跨模式稳定），
+自行做合理假设或继续，绝不阻塞。工具由 make_tools() 工厂构造进每个循环，
 triage/to-tickets 等非交互流程的 prompt 不提及它们，LLM 极少误调。
 """
 

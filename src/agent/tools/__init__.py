@@ -1,4 +1,20 @@
-"""工具注册表 —— 统一管理所有可用工具。"""
+"""工具工厂 —— 每个循环一份独立实例，互不共享可变状态。
+
+v2.4 前是全局单例注册表（ALL_TOOLS）：bash 的 mode/_plan 是实例状态，
+单例意味着所有循环共享——串行下靠"子 agent 注入独立 BashTool 实例"
+的补丁活着，一旦并行派发（v2.4 扇出）就是竞态。工厂化后：
+
+    主循环   每次调 _run_loop 时 make_tools() 一份全新实例
+    子 agent make_tools(受限名单) 一份全新实例
+
+plan 模式的生命周期天然对齐"一次 _run_loop 调用"：计划在实例内收集、
+经 __execute_plan__ 执行，循环结束实例即弃——跨循环零泄漏。
+
+TOOL_CLASSES 是名字 → 类的目录（schema 与测试的单一事实来源）；
+运行时实例一律经 make_tools 构造，不走目录直接实例化。
+"""
+
+from __future__ import annotations
 
 from agent.tools.base import BaseTool
 from agent.tools.read import ReadTool
@@ -10,48 +26,45 @@ from agent.tools.tickets import AllocateIssueTool
 from agent.tools.interact import AskUserTool, CheckpointTool
 from agent.tools.task import TaskTool
 
-# 按名称索引的工具实例
-ALL_TOOLS: dict[str, BaseTool] = {}
+# 名字 → 工具类目录（工厂的原料表；键必须与工具的 .name 一致）
+TOOL_CLASSES: dict[str, type[BaseTool]] = {
+    "read": ReadTool,
+    "write": WriteTool,
+    "edit": EditTool,
+    "bash": BashTool,
+    "list_issues": ListIssuesTool,
+    "set_issue_status": SetIssueStatusTool,
+    "allocate_issue": AllocateIssueTool,
+    "ask_user": AskUserTool,
+    "checkpoint": CheckpointTool,
+    # task 在目录里，但不在任何子 agent 的工具名单中 —— 递归的结构性防线
+    "task": TaskTool,
+}
 
-# 对 BashTool 的强引用（loop.py 需要它来切换安全模式）
-_BASH_TOOL: BashTool | None = None
+# 全部工具名（make_tools() 不传 names 时的默认集）
+ALL_TOOL_NAMES: tuple[str, ...] = tuple(TOOL_CLASSES)
+
+# 导入期校验：键与 .name 错位、同一类挂多个键，都在这里当场暴露
+for _name, _cls in TOOL_CLASSES.items():
+    if _cls().name != _name:
+        raise RuntimeError(f"工具目录错位：'{_name}' 键下的 {_cls.__name__}.name 是 '{_cls().name}'")
 
 
-def _register(tool: BaseTool) -> None:
-    """把工具实例注册到全局表中。
+def make_tools(names: list[str] | tuple[str, ...] | None = None) -> dict[str, BaseTool]:
+    """构造一组全新工具实例。
 
-    如果同名工具已存在，说明注册了重复的工具，应立即暴露问题。
+    参数:
+        names: 工具名子集（子 agent 的受限工具集）；None = 全部。
+
+    返回:
+        name → 全新实例 的字典。每次调用独立构造——bash 的 mode/_plan
+        等可变状态互不共享，并行调用安全。
+
+    抛出:
+        ValueError: names 含未注册的工具名（配置错误，应尽早暴露）。
     """
-    if tool.name in ALL_TOOLS:
-        raise ValueError(
-            f"工具名冲突：'{tool.name}' 已被 {ALL_TOOLS[tool.name].__class__.__name__} 注册，"
-            f"无法再注册 {tool.__class__.__name__}"
-        )
-    ALL_TOOLS[tool.name] = tool
-
-
-def get_bash_tool() -> BashTool:
-    """返回 BashTool 的单例实例，用于运行时切换安全模式。"""
-    global _BASH_TOOL
-    if _BASH_TOOL is None:
-        raise RuntimeError("BashTool 尚未初始化 —— 请先调用 _register(BashTool())")
-    return _BASH_TOOL
-
-
-_register(ReadTool())
-_register(WriteTool())
-_register(EditTool())
-
-_bash = BashTool()
-_BASH_TOOL = _bash
-_register(_bash)
-
-_register(ListIssuesTool())
-_register(SetIssueStatusTool())
-_register(AllocateIssueTool())
-
-_register(AskUserTool())
-_register(CheckpointTool())
-
-# task 最后注册 —— 它延迟依赖 agent.loop，而 loop 依赖本注册表
-_register(TaskTool())
+    selected = ALL_TOOL_NAMES if names is None else tuple(names)
+    unknown = [n for n in selected if n not in TOOL_CLASSES]
+    if unknown:
+        raise ValueError(f"未注册的工具名：{unknown}。可选：{list(ALL_TOOL_NAMES)}")
+    return {n: TOOL_CLASSES[n]() for n in selected}

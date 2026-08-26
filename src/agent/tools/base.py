@@ -1,8 +1,9 @@
 """工具基类 —— 所有工具的统一抽象。"""
 
 import inspect
+import types
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Union, get_args, get_origin
 
 
 class BaseTool(ABC):
@@ -59,6 +60,25 @@ class BaseTool(ABC):
         str: "string",
     }
 
+    def _json_type(self, annotation: Any) -> str:
+        """把 Python 类型注解映射到 JSON Schema type。
+
+        支持 list[...] → array；X | None / Optional[X] 递归解包到 X；
+        未知类型回退 string（LLM 能客串大多数标量）。
+        """
+        if annotation is inspect.Parameter.empty:
+            return "string"
+        if annotation in self._TYPE_MAP:
+            return self._TYPE_MAP[annotation]
+        origin = get_origin(annotation)
+        if origin is list:
+            return "array"
+        if origin is Union or origin is types.UnionType:  # Optional[X] 与 X | None
+            non_none = [a for a in get_args(annotation) if a is not type(None)]
+            if len(non_none) == 1:
+                return self._json_type(non_none[0])
+        return "string"
+
     def to_openai_function(self) -> dict[str, Any]:
         """生成 OpenAI 兼容的 function 定义。
 
@@ -66,13 +86,18 @@ class BaseTool(ABC):
         子类无需手动编写参数描述 —— 参数名、类型、必填信息全部由反射推导。
 
         工作原理:
-            1. 用 inspect.signature() 拿到 run() 的签名
+            1. 用 inspect.signature(eval_str=True) 拿到 run() 的签名
+               （eval_str：from __future__ import annotations 下注解是字符串，
+               需求值后才能映射类型；求值失败回退 string）
             2. 遍历每个参数（跳过 self）
             3. 根据类型注解映射到 JSON Schema type
             4. 没有默认值的参数加入 required 列表
             5. 组装为 OpenAI function calling 格式返回
         """
-        sig = inspect.signature(self.run)
+        try:
+            sig = inspect.signature(self.run, eval_str=True)
+        except (TypeError, NameError):
+            sig = inspect.signature(self.run)
 
         properties: dict[str, dict] = {}
         required: list[str] = []
@@ -82,10 +107,8 @@ class BaseTool(ABC):
             if param_name == "self":
                 continue
 
-            # 根据类型注解推断 JSON Schema 类型，默认 fallback 为 string
-            json_type = "string"
-            if param.annotation is not inspect.Parameter.empty:
-                json_type = self._TYPE_MAP.get(param.annotation, "string")
+            # 根据类型注解推断 JSON Schema 类型（list/Optional 详见 _json_type）
+            json_type = self._json_type(param.annotation)
 
             # 从 run() 的 docstring 中提取参数说明（如果有的话）
             param_desc = f"{param_name} 参数"

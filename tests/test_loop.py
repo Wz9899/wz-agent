@@ -276,27 +276,24 @@ def test_run_loop_handles_invalid_json_args(monkeypatch):
     assert any("[ERR] 工具 'read' 的参数不是合法 JSON" in m.get("content", "") for m in msgs)
 
 
-def test_run_loop_sets_mode_on_injected_bash_not_global(monkeypatch):
-    """tools 注入独立 bash 时，mode 写到该实例，不改全局单例（防污染父循环 plan）。"""
-    from agent.tools import get_bash_tool
-    from agent.tools.bash import BashTool
+def test_run_loop_sets_mode_on_injected_tools_only(monkeypatch):
+    """tools 注入时 mode 写到该实例；另一个循环的工厂实例不受影响（v2.4 工厂语义）。"""
+    from agent.tools import make_tools
 
-    global_bash = get_bash_tool()
-    global_bash.mode = "plan"
-    global_bash.run("echo parent")  # 父循环已收集一条执行计划
+    other_loop_bash = make_tools()["bash"]  # 模拟另一个循环的工具实例
+    other_loop_bash.mode = "plan"
+    other_loop_bash.run("echo parent")     # 它已收集一条执行计划
 
-    fresh = BashTool()  # 子 agent 注入的独立实例（task.py 的做法）
+    injected = make_tools(["bash"])        # 本循环注入的工具集（全新实例）
 
     resp = _D(choices=[_D(message=_D(role="assistant", content="done", tool_calls=None))])
     client = _D(chat=_D(completions=_D(create=lambda **kw: resp)))
     monkeypatch.setattr(loop, "_get_client", lambda: client)
 
     msgs = [{"role": "system", "content": "S"}, {"role": "user", "content": "U"}]
-    result = loop._run_loop(msgs, stream=False, tools={"bash": fresh}, bash_safety_mode="auto")
+    result = loop._run_loop(msgs, stream=False, tools=injected, bash_safety_mode="auto")
 
     assert result == "done"
-    assert fresh.mode == "auto"        # 模式写到注入实例
-    assert global_bash.mode == "plan"  # 全局单例未被翻成 auto
-    assert len(global_bash.plan) == 1  # 父循环计划未被清空
-
-    global_bash.mode = "auto"  # 还原全局单例状态
+    assert injected["bash"].mode == "auto"       # 模式写到注入实例
+    assert other_loop_bash.mode == "plan"         # 另一循环不受影响
+    assert len(other_loop_bash.plan) == 1         # 其计划未被清空
