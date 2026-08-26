@@ -158,6 +158,17 @@ def _run_to_tickets(target: str, safety_mode: str, stream: bool) -> None:
 # ============================================================
 
 
+def is_self_harness(path: Path) -> bool:
+    """目标是否落在 wz-agent 自身仓库内（含根、src/ 等任意子目录）。
+
+    防自噬护栏：agent 没有自我模型，锚到自己源码时会把 harness 代码当
+    "用户项目"探索、提议集成、甚至直接修改（实测事故：从 src/ 里裸启
+    python main.py，agent 建议把新项目"接入你现有的 main.py"）。
+    """
+    resolved = path.resolve()
+    return resolved == PROJECT_ROOT or PROJECT_ROOT in resolved.parents
+
+
 @click.command()
 @click.argument("args", nargs=-1, required=False)
 @click.option(
@@ -192,6 +203,12 @@ def _run_to_tickets(target: str, safety_mode: str, stream: bool) -> None:
     default=None,
     help="复用指定运行目录调试（如 runs/20260802_113114），不新建；沿用其中 spec 与代码",
 )
+@click.option(
+    "--allow-self",
+    is_flag=True,
+    default=False,
+    help="允许目标为 wz-agent 自身仓库（自举开发；默认拒绝防 agent 改自己源码）",
+)
 def main(
     args: tuple[str, ...],
     target: Path | None,
@@ -199,6 +216,7 @@ def main(
     no_stream: bool,
     no_interactive: bool,
     run_opt: Path | None,
+    allow_self: bool,
 ) -> None:
     """wz-agent — 通用编码助手：主动追问需求，自动生成代码。"""
 
@@ -207,6 +225,18 @@ def main(
         anchored = paths.set_target(target if target is not None else LAUNCH_CWD)
     except FileNotFoundError as e:
         console.print(Panel.fit(f"[bold red]{e}[/]", title="wz-agent"))
+        raise SystemExit(1)
+
+    # 防自噬：目标落在 wz-agent 自身仓库内 → 拒绝（自举开发用 --allow-self 显式放行）
+    if is_self_harness(anchored) and not allow_self:
+        console.print(Panel.fit(
+            f"[bold red]目标项目是 wz-agent 自身仓库：[/]\n{anchored}\n\n"
+            "agent 没有自我模型，锚在这里它会把 harness 代码当成你的项目，"
+            "甚至修改自己的源码。\n\n"
+            "请用 -C 指向你自己的项目目录；\n"
+            "确实要用 wz-agent 开发 wz-agent（自举）时加 --allow-self。",
+            title="wz-agent",
+        ))
         raise SystemExit(1)
 
     args = list(args)

@@ -70,6 +70,7 @@
 | schema 类型修复 | `tools/base.py` —— eval_str 求值注解 + list→array + X\|None 解包（append 的 boolean 此前一直误判 string） | ✅ |
 | 并行扇出 | `tools/task.py` —— fan_out 线程池并行调查，按序聚合；只读护栏 + MAX_FAN_OUT=4；Ctrl-C 走中断菜单 | ✅ 144 测试全绿 |
 | 按票实现（票即任务） | `base.py` 模式二之按票流程 + `issues.py` done 标签/get_blocked_by/ticket_stem + triage 评论模板 —— to-tickets→triage→逐票派 coder→置 done→PROGRESS 记账，issue 线闭环 | ✅ 149 测试全绿 |
+| 防自噬护栏 | `main.py` is_self_harness + --allow-self —— 目标落在 wz-agent 自身仓库内时拒绝（agent 无自我模型，会把 harness 当用户项目甚至改自己源码）；自举开发显式放行 | ✅ 154 测试全绿 |
 | git 边界 | harness 零 git 调用；agent 可读不可写（prompt 级）；/clear 只删 spec 不碰项目文件 | ✅ 136 测试全绿 |
 
 ## 待完成
