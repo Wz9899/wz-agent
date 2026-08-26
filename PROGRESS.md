@@ -62,6 +62,8 @@
 | 子 agent 派发 | `tools/task.py` — task 工具（investigator/coder），LLM 自主决策、独立上下文、递归防线 | ✅ 已验证（DeepSeek 全链路） |
 | 工具集注入 | `loop.py` — run()/_run_loop() 新增 tools 参数，支持受限注册表 | ✅ |
 | Windows bash 修复 | `tools/bash.py` — Windows 下用 git-bash 执行（临时脚本法），POSIX 语法不再撞 cmd 墙 | ✅ 已验证 |
+| 单循环会话重构 | `prompts/base.py` + `loop.py:continue_turn` + `session.py` 重写 —— 删意图分类器与三层会话，澄清/编码/修改在同一对话模型自路由；[DONE] 协议退役 | ✅ 129 测试全绿 |
+| 播种会话 | `main.py` —— 命令行任务参数直接进 REPL（pi 式），删 --phase；--no-interactive 保留 headless 出口 | ✅ |
 
 ## 待完成
 
@@ -73,7 +75,10 @@
 | 版本 | 功能 | 状态 |
 |---|---|---|
 | v2.1 | 子 agent 派发（task 工具）+ Windows bash 修复 | ✅ |
-| v2.2 | triage 支持批量评论模板、ticket 与 code 阶段自动衔接（逐个 ticket 交办） | 📋 |
+| v2.2 | 单循环会话重构：删意图分类器，基座提示模型自路由（本轮） | ✅ |
+| v2.3 | git 还原点（运行边界自动 commit）+ 目标仓库锚定 | 📋 |
+| v2.4 | task 工具并行扇出 + 工具实例工厂化（修共享单例竞态） | 📋 |
+| v2.5 | triage 批量评论模板、ticket ↔ code 自动衔接 | 📋 |
 
 ## 技术选型
 

@@ -288,7 +288,7 @@ def _run_with_retry_on_messages(
 ) -> str:
     """在给定的消息列表上跑带自动修复的循环（共享同一份历史）。
 
-    run_with_retry 与 run_interactive(retry=True) 共用的底层逻辑。
+    run_with_retry 与 continue_turn（单循环会话轮次）共用的底层逻辑。
     '[API-ERR]'（基础设施故障）与 '[ABORT]'（用户中止）开头不重试。
     """
     for attempt in range(max_retries + 1):
@@ -509,95 +509,42 @@ def _run_loop(
 
 
 # ============================================================
-# 人机交互循环
+# 单循环会话轮次
 # ============================================================
 
 
-def run_interactive(
-    system_prompt: str,
-    user_message: str,
+def continue_turn(
+    messages: list[dict],
+    user_input: str,
     *,
-    retry: bool = False,
-    max_steps: int = 10,
     bash_safety_mode: str = "auto",
-    max_retries: int = 3,
-    stream: bool = False,
-    max_rounds: int = 20,
+    max_steps: int = 30,
+    stream: bool = True,
 ) -> str:
-    """监督式自主执行：agent 按计划自主跑，用户通过 Ctrl-C 随时干预。
+    """单循环会话的一轮：追加用户输入 → 带自动修复地跑 ReAct 循环。
 
-    两种模式：
-      - retry=True（code 编码执行）：自主执行，跑完一轮（带自动修复）即返回，
-        中间不停下来问用户。用户随时 Ctrl-C 打断（继续 / 注入指令 / 停止）。
-      - retry=False（clarify 需求澄清）：对话循环——agent 用 ask_user 工具
-        追问，或在返回普通文本问题时等待用户回答，直到 [DONE] 结束。
+    messages 由调用方（session REPL）跨轮持有，本函数只追加、不重建——
+    这是 v2.2 单循环架构的唯一会话入口：澄清、编码、修改、问答共用
+    同一份历史，阶段切换由模型路由（见 prompts/base.py）。
 
-    - agent 回复以 [DONE]/[ERR]/[WARN]/[API-ERR]/[ABORT] 开头或为空 → 终止。
-    - 对话循环中 Ctrl-C：handle_interrupt 菜单（继续 / 注入指令 / 停止）。
-    - 非交互模式（interactive.ENABLED=False）退化为单次 run/run_with_retry。
+    失败语义沿用哨兵协议：结果以 '[ERR]'/'[WARN]' 开头时自动把失败详情
+    回喂给 LLM 修复（最多 3 次）；'[API-ERR]'/'[ABORT]' 直接返回不重试。
+    Ctrl-C 中断菜单（继续/注入/停止）由 _run_loop 内部处理。
 
-    max_rounds 为 clarify 对话轮次硬上限，防死循环。
+    参数:
+        messages:         跨轮持久的对话历史（含 system 消息），就地追加。
+        user_input:       本轮用户输入（需求/修改意见/提问/命令译文）。
+        bash_safety_mode: Bash 安全模式 —— 'auto' 或 'plan'。
+        max_steps:        本轮最大工具调用次数（硬上限，防死循环）。
+        stream:           是否流式输出（实时打印思考与工具调用）。
+
+    返回:
+        模型的最终文本回复；异常/中断时为哨兵错误描述。
     """
-    if not interactive.ENABLED:
-        if retry:
-            return run_with_retry(
-                system_prompt, user_message,
-                max_steps=max_steps, bash_safety_mode=bash_safety_mode,
-                max_retries=max_retries, stream=stream,
-            )
-        return run(
-            system_prompt, user_message,
-            max_steps=max_steps, bash_safety_mode=bash_safety_mode,
-            stream=stream,
-        )
-
-    messages: list[dict] = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_message},
-    ]
-
-    if retry:
-        # code：自主执行，跑完一轮（带自动修复）即返回；
-        # 中途 Ctrl-C 由 _run_loop 的 handle_interrupt 菜单处理
-        return _run_with_retry_on_messages(
-            messages,
-            bash_safety_mode=bash_safety_mode,
-            max_steps=max_steps,
-            max_retries=max_retries,
-            stream=stream,
-        )
-
-    # clarify：对话循环——agent 返回普通文本问题后，等用户回答继续
-    # 澄清阶段不流式展示思考：中间推理与工具调用对用户是噪音，真正要暴露的
-    # 只有 ask_user 的问题（由工具自身 print_human 呈现）。故强制 stream=False，
-    # 忽略调用方传入的 stream 旗标；最终结论（[DONE]）由调用方负责呈现。
-    for _ in range(max_rounds):
-        result = _run_loop(
-            messages,
-            bash_safety_mode=bash_safety_mode,
-            max_steps=max_steps,
-            stream=False,
-        )
-
-        # agent 本轮结束（[DONE]/错误/中断/空）→ 对话结束
-        if interactive.is_terminal(result):
-            return result
-
-        # agent 返回了普通文本（通常是问题）—— 等用户回答继续
-        try:
-            answer = interactive.prompt_human("\n你的回答 > ")
-        except EOFError:
-            return "[ABORT] 输入结束（EOF），对话终止。"
-        except KeyboardInterrupt:
-            if not interactive.ENABLED:
-                raise
-            action = interactive.handle_interrupt(messages)
-            if action == "abort":
-                return "[ABORT] 用户中断执行。"
-            continue  # resume / inject：已处理，重新进循环
-
-        if answer.lower() in ("exit", "quit", "q", "exit()"):
-            return "[ABORT] 用户主动退出对话。"
-        messages.append({"role": "user", "content": answer})
-
-    return f"[WARN] 对话轮数超限（{max_rounds} 轮），已停止。"
+    messages.append({"role": "user", "content": user_input})
+    return _run_with_retry_on_messages(
+        messages,
+        bash_safety_mode=bash_safety_mode,
+        max_steps=max_steps,
+        stream=stream,
+    )

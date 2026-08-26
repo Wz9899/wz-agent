@@ -1,4 +1,10 @@
-"""交互会话单元测试：意图识别、命令分发、会话主循环。"""
+"""交互会话单元测试：单循环 REPL、斜杠命令、消息持久化。
+
+v2.2：意图分类器与阶段函数（run_clarify/run_code/run_modify/run_qa）
+已删除——路由交给模型，不再有可测试的 Python 分类逻辑。这里测的是
+REPL 的确定性部分：输入分发、messages 跨轮持久、斜杠命令、播种、
+哨兵收尾。
+"""
 
 from pathlib import Path
 
@@ -14,387 +20,228 @@ def _isolate_run_dir(tmp_path, monkeypatch):
     runtime.start_run()  # 重置 _current 指向当前测试的临时目录
 
 
-# ---------- is_code_intent ----------
-
-
-def test_code_intent_exact_triggers():
-    for t in ("编码", "开始编码", "实现", "开始实现", "开工", "写代码", "code", "build"):
-        assert session.is_code_intent(t), t
-
-
-def test_code_intent_strips_punctuation():
-    assert session.is_code_intent("编码。")
-    assert session.is_code_intent(" 实现！")
-    assert session.is_code_intent(" 开始 ")
-
-
-def test_code_intent_short_instruction():
-    """短指令（≤8 字且含触发词）识别为编码意图，如"开始编码吧"。"""
-    assert session.is_code_intent("开始编码吧")
-    assert session.is_code_intent("去实现")
-    assert session.is_code_intent("现在开始")
-
-
-def test_code_intent_not_triggered_by_long_text():
-    """长需求描述（含触发词）不被误判为编码意图。"""
-    assert not session.is_code_intent("帮我实现一个猜人游戏")
-    assert not session.is_code_intent("这个功能需要实现吗？")
-    assert not session.is_code_intent("我想开始一个新项目")
-    assert not session.is_code_intent("加一个计分系统")
-
-
-def test_done_requirements_phrases():
-    """识别"需求已完整、无需补充"的表达，不误判补充内容。"""
-    assert session._is_done_requirements("没有补充了")
-    assert session._is_done_requirements("就这样吧")
-    assert session._is_done_requirements("不用了，可以了")
-    assert not session._is_done_requirements("没有做计分系统")  # 补充内容不误判
-
-
-def test_is_question():
-    """识别明确提问（直接回答），不把需求/指令/语气误判为提问。"""
-    assert session._is_question("数据来源是啥")
-    assert session._is_question("用什么语言？")
-    assert session._is_question("为什么这样做")
-    assert session._is_question("这个怎么运行的")
-    assert session._is_question("这个游戏能玩吗")  # 短问句以"吗"结尾
-    assert not session._is_question("帮我写一个猜数字游戏")
-    assert not session._is_question("把范围改成 1-1000")
-    assert not session._is_question("编码吧")
-    assert not session._is_question("加一个计分系统")
-    assert not session._is_question("嗯")
-
-
-def test_is_noop_input():
-    """语气词/确认词/过短输入 → 不触发任何动作。"""
-    assert session._is_noop_input("嗯")
-    assert session._is_noop_input("好的")
-    assert session._is_noop_input("ok")
-    assert session._is_noop_input("")
-    assert not session._is_noop_input("帮我写一个游戏")
-
-
-def test_is_requirement():
-    """明确需求表达（含动作词）才触发需求澄清。"""
-    assert session._is_requirement("帮我写一个猜数字游戏")
-    assert session._is_requirement("做一个 NBA 游戏")
-    assert session._is_requirement("我想开发一个工具")
-    assert not session._is_requirement("数据来源是啥")
-    assert not session._is_requirement("编码吧")
-    assert not session._is_requirement("把范围改成 1-1000")
-    assert not session._is_requirement("嗯")
-
-
-def test_session_noop_input_ignored(monkeypatch):
-    """语气词输入被忽略，不触发任何 agent 动作。"""
-    answers = iter(["嗯", "好的", "/exit"])
+def _feed(monkeypatch, *lines: str) -> None:
+    """把 REPL 的用户输入序列喂给 prompt_human（按序耗尽）。"""
+    answers = iter(lines)
     monkeypatch.setattr(interactive, "prompt_human", lambda prompt: next(answers))
-    monkeypatch.setattr(session, "spec_exists", lambda: False)
-    monkeypatch.setattr(session, "has_generated_code", lambda: False)
-    called = {"clarify": [], "qa": [], "code": [], "modify": []}
-    monkeypatch.setattr(session, "run_clarify", lambda r, sm, st: called["clarify"].append(r))
-    monkeypatch.setattr(session, "run_qa", lambda q, sm, st: called["qa"].append(q))
-    monkeypatch.setattr(session, "run_code", lambda i, sm, st: called["code"].append(i))
-    monkeypatch.setattr(session, "run_modify", lambda i, sm, st: called["modify"].append(i))
+
+
+def _fake_turn(recorder: list):
+    """造一个行为等价于真 continue_turn 的桩：记录历史快照并追加消息。
+
+    必须真的 append——否则无法验证"messages 跨轮持久"这一核心不变量。
+    """
+
+    def fake_continue_turn(messages, line, **kwargs):
+        messages.append({"role": "user", "content": line})
+        recorder.append([m["content"] for m in messages if m["role"] == "user"])
+        messages.append({"role": "assistant", "content": "ok"})
+        return "ok"
+
+    return fake_continue_turn
+
+
+# ---------- 会话启动 / 退出 ----------
+
+
+def test_session_exit_command(monkeypatch):
+    """/exit 退出，不触发任何模型调用。"""
+    _feed(monkeypatch, "/exit")
+    called = []
+    monkeypatch.setattr(session, "continue_turn", lambda *a, **k: called.append(a))
     session.run_interactive_session()
-    assert called == {"clarify": [], "qa": [], "code": [], "modify": []}
+    assert called == []
 
 
-def test_session_unrecognized_prompts(monkeypatch):
-    """无法识别的输入 → 提示，不触发任何 agent 动作。"""
-    answers = iter(["随便说说", "/exit"])
-    monkeypatch.setattr(interactive, "prompt_human", lambda prompt: next(answers))
-    monkeypatch.setattr(session, "spec_exists", lambda: False)
-    monkeypatch.setattr(session, "has_generated_code", lambda: False)
-    called = {"clarify": [], "qa": [], "code": [], "modify": []}
-    monkeypatch.setattr(session, "run_clarify", lambda r, sm, st: called["clarify"].append(r))
-    monkeypatch.setattr(session, "run_qa", lambda q, sm, st: called["qa"].append(q))
-    monkeypatch.setattr(session, "run_code", lambda i, sm, st: called["code"].append(i))
-    monkeypatch.setattr(session, "run_modify", lambda i, sm, st: called["modify"].append(i))
-    printed = []
-    monkeypatch.setattr(session.console, "print", lambda *a, **k: printed.append(a))
-    session.run_interactive_session()
-    assert called == {"clarify": [], "qa": [], "code": [], "modify": []}
-    assert any("没理解" in str(x) for x in printed)
+def test_session_exit_words(monkeypatch):
+    """退出词（exit/quit/q/退出）是 REPL 层确定性出口。"""
+    for word in ("exit", "quit", "q", "退出"):
+        _feed(monkeypatch, word)
+        called = []
+        monkeypatch.setattr(session, "continue_turn", lambda *a, **k: called.append(a))
+        session.run_interactive_session()
+        assert called == []
 
 
-def test_run_code_injects_existing_files(monkeypatch):
-    """编码时注入 output/ 已有文件，指导 agent 增量开发而非从头重写。"""
-    monkeypatch.setattr(session, "spec_exists", lambda: True)
-    monkeypatch.setattr(session, "ensure_spec", lambda: "# spec")
-    out_dir = runtime.output_dir()
-    out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "game.js").write_text("// existing", encoding="utf-8")
-
-    captured = {}
-
-    def fake_run_interactive(sp, um, **kw):
-        captured["task"] = um
-        return "[DONE]"
-
-    monkeypatch.setattr(session, "run_interactive", fake_run_interactive)
-    session.run_code("编码", "auto", True)
-    assert "game.js" in captured["task"]       # 列出已有文件
-    assert "增量开发" in captured["task"]      # 指导增量
-    assert "从头重写" in captured["task"]      # 明确不重写
-
-
-def test_run_modify_uses_modify_prompt(monkeypatch):
-    """修改反馈用独立的修改 prompt（而非编码 prompt），避免 agent 重写整个文件。"""
-    monkeypatch.setattr(session, "spec_exists", lambda: False)  # 不生成 spec 上下文
-    out = runtime.output_dir()
-    out.mkdir(parents=True, exist_ok=True)
-    (out / "game.js").write_text("// game", encoding="utf-8")
-
-    captured = {}
-
-    def fake_run_interactive(sp, um, **kw):
-        captured["prompt"] = sp
-        captured["task"] = um
-        return "[DONE]"
-
-    monkeypatch.setattr(session, "run_interactive", fake_run_interactive)
-    session.run_modify("把范围改大", "auto", True)
-    assert captured["prompt"] == session.MODIFY_SYSTEM_PROMPT
-    assert "不要用 write 重写整个文件" in captured["task"]
-
-
-def test_run_code_no_existing_files(monkeypatch):
-    """output/ 为空时不注入"已有文件"提示。"""
-    monkeypatch.setattr(session, "spec_exists", lambda: True)
-    monkeypatch.setattr(session, "ensure_spec", lambda: "# spec")
-    captured = {}
-
-    def fake_run_interactive(sp, um, **kw):
-        captured["task"] = um
-        return "[DONE]"
-
-    monkeypatch.setattr(session, "run_interactive", fake_run_interactive)
-    session.run_code("编码", "auto", True)
-    assert "已有的文件" not in captured["task"]
+def test_session_eof_exits_cleanly(monkeypatch):
+    """EOF（输入流结束）→ 干净退出，不抛异常。"""
+    def _eof(prompt):
+        raise EOFError
+    monkeypatch.setattr(interactive, "prompt_human", _eof)
+    session.run_interactive_session()  # 不抛即通过
 
 
 def test_session_uses_provided_run_dir(monkeypatch):
     """传 run_dir 时复用指定目录（调试 agent），不新建运行目录。"""
-    monkeypatch.setattr(interactive, "prompt_human", lambda prompt: "/exit")
+    _feed(monkeypatch, "/exit")
     provided = runtime.RUNS_DIR / "prev_run"
     session.run_interactive_session(run_dir=provided)
     assert runtime.current() == provided
 
 
-def test_session_question_dispatches_to_qa(monkeypatch):
-    """输入提问 → run_qa，不当作需求澄清。"""
-    answers = iter(["数据来源是啥", "/exit"])
-    monkeypatch.setattr(interactive, "prompt_human", lambda prompt: next(answers))
-    monkeypatch.setattr(session, "spec_exists", lambda: False)
-    monkeypatch.setattr(session, "has_generated_code", lambda: False)
-    called = {"qa": [], "clarify": []}
-    monkeypatch.setattr(session, "run_qa", lambda q, sm, st: called["qa"].append(q))
-    monkeypatch.setattr(session, "run_clarify", lambda r, sm, st: called["clarify"].append(r))
+# ---------- 单循环核心：自由输入 → continue_turn，messages 持久 ----------
+
+
+def test_free_text_goes_to_continue_turn(monkeypatch):
+    """任何非命令输入都交给 continue_turn（模型路由），不做本地分类。"""
+    _feed(monkeypatch, "帮我写游戏", "/exit")
+    seen = []
+
+    def fake(messages, line, **kwargs):
+        seen.append(line)
+        return "ok"
+
+    monkeypatch.setattr(session, "continue_turn", fake)
     session.run_interactive_session()
-    assert called["qa"] == ["数据来源是啥"]
-    assert called["clarify"] == []
+    assert seen == ["帮我写游戏"]
 
 
-# ---------- _handle_command ----------
-
-
-def test_handle_command_exit():
-    for c in ("/exit", "/quit", "/bye"):
-        assert session._handle_command(c) == "exit", c
-
-
-def test_handle_command_help(monkeypatch):
-    printed = []
-    monkeypatch.setattr(session.console, "print", lambda *a, **k: printed.append(a))
-    assert session._handle_command("/help") == "continue"
-    assert any("可用命令" in str(x) for x in printed)
-
-
-def test_handle_command_spec_missing(monkeypatch):
-    monkeypatch.setattr(session, "spec_exists", lambda: False)
-    printed = []
-    monkeypatch.setattr(session.console, "print", lambda *a, **k: printed.append(a))
-    assert session._handle_command("/spec") == "continue"
-    assert any("还没有 spec.md" in str(x) for x in printed)
-
-
-def test_handle_command_unknown(monkeypatch):
-    printed = []
-    monkeypatch.setattr(session.console, "print", lambda *a, **k: printed.append(a))
-    assert session._handle_command("/nope") == "continue"
-    assert any("未知命令" in str(x) for x in printed)
-
-
-# ---------- run_interactive_session ----------
-
-
-def test_session_clarify_then_exit(monkeypatch):
-    """无 spec、无已生成代码：输入需求 → clarify；再 /exit → 退出。"""
-    answers = iter(["帮我写一个猜人游戏", "/exit"])
-    monkeypatch.setattr(interactive, "prompt_human", lambda prompt: next(answers))
-    monkeypatch.setattr(session, "spec_exists", lambda: False)
-    monkeypatch.setattr(session, "has_generated_code", lambda: False)
-    called = {"clarify": [], "code": [], "modify": []}
-    monkeypatch.setattr(session, "run_clarify", lambda req, sm, st: called["clarify"].append(req))
-    monkeypatch.setattr(session, "run_code", lambda ins, sm, st: called["code"].append(ins))
-    monkeypatch.setattr(session, "run_modify", lambda ins, sm, st: called["modify"].append(ins))
-
-    session.run_interactive_session()
-    assert called["clarify"] == ["帮我写一个猜人游戏"]
-    assert called["code"] == []
-    assert called["modify"] == []
-
-
-def test_session_code_intent_dispatches_to_code(monkeypatch):
-    """有 spec：输入"编码" → run_code。"""
-    answers = iter(["编码", "/exit"])
-    monkeypatch.setattr(interactive, "prompt_human", lambda prompt: next(answers))
-    monkeypatch.setattr(session, "spec_exists", lambda: True)
-    monkeypatch.setattr(session, "has_generated_code", lambda: False)
-    called = {"clarify": [], "code": [], "modify": []}
-    monkeypatch.setattr(session, "run_clarify", lambda req, sm, st: called["clarify"].append(req))
-    monkeypatch.setattr(session, "run_code", lambda ins, sm, st: called["code"].append(ins))
-    monkeypatch.setattr(session, "run_modify", lambda ins, sm, st: called["modify"].append(ins))
-
-    session.run_interactive_session()
-    assert called["code"] == ["编码"]
-    assert called["clarify"] == []
-    assert called["modify"] == []
-
-
-def test_session_exit_word(monkeypatch):
-    """输入 exit 直接退出，不触发任何执行。"""
-    monkeypatch.setattr(interactive, "prompt_human", lambda prompt: "exit")
-    called = []
-    monkeypatch.setattr(session, "run_clarify", lambda req, sm, st: called.append("clarify"))
-    session.run_interactive_session()
-    assert called == []
-
-
-def test_session_ctrl_c_exits(monkeypatch):
-    """会话空闲时 Ctrl-C → 退出，不抛异常。"""
-    def _ctrl_c(prompt):
-        raise KeyboardInterrupt
-    monkeypatch.setattr(interactive, "prompt_human", _ctrl_c)
+def test_messages_persist_across_turns(monkeypatch):
+    """messages 跨轮持久：第 2 轮能看到第 1 轮的历史（单循环核心不变量）。"""
+    _feed(monkeypatch, "帮我写游戏", "改成网页版", "/exit")
+    snapshots: list[list[str]] = []
+    monkeypatch.setattr(session, "continue_turn", _fake_turn(snapshots))
     session.run_interactive_session()
 
-
-def test_session_eof_exits(monkeypatch):
-    """输入流结束（EOF）→ 退出，不死循环。"""
-    def _eof(prompt):
-        raise EOFError
-    monkeypatch.setattr(interactive, "prompt_human", _eof)
-    session.run_interactive_session()
+    assert snapshots[0] == ["帮我写游戏"]
+    assert snapshots[1] == ["帮我写游戏", "改成网页版"]
 
 
-def test_session_modify_intent_dispatches_to_modify(monkeypatch):
-    """有已生成代码时，输入修改意见 → run_modify（而非新需求澄清）。"""
-    answers = iter(["把范围改成 1-1000", "/exit"])
-    monkeypatch.setattr(interactive, "prompt_human", lambda prompt: next(answers))
-    monkeypatch.setattr(session, "spec_exists", lambda: True)
-    monkeypatch.setattr(session, "has_generated_code", lambda: True)
-    called = {"clarify": [], "code": [], "modify": []}
-    monkeypatch.setattr(session, "run_clarify", lambda req, sm, st: called["clarify"].append(req))
-    monkeypatch.setattr(session, "run_code", lambda ins, sm, st: called["code"].append(ins))
-    monkeypatch.setattr(session, "run_modify", lambda ins, sm, st: called["modify"].append(ins))
-
-    session.run_interactive_session()
-    assert called["modify"] == ["把范围改成 1-1000"]
-    assert called["clarify"] == []
+def test_system_prompt_contains_runtime_paths():
+    """系统提示含本次运行的 spec.md 与 output/ 绝对路径（权威声明）。"""
+    prompt = session.build_system_prompt()
+    assert str(runtime.spec_path()) in prompt
+    assert str(runtime.output_dir()) in prompt
 
 
-def test_has_generated_code_true(monkeypatch):
-    monkeypatch.setattr(session, "_generated_code_files", lambda: [Path("game.py")])
-    assert session.has_generated_code() is True
+def test_seed_runs_first_turn(monkeypatch):
+    """命令行任务参数（seed）作为第一轮直接执行。"""
+    _feed(monkeypatch, "/exit")
+    seen = []
+
+    def fake(messages, line, **kwargs):
+        seen.append(line)
+        return "ok"
+
+    monkeypatch.setattr(session, "continue_turn", fake)
+    session.run_interactive_session(seed="帮我写一个猜人游戏")
+    assert seen == ["帮我写一个猜人游戏"]
 
 
-def test_has_generated_code_false(monkeypatch):
-    monkeypatch.setattr(session, "_generated_code_files", lambda: [])
-    assert session.has_generated_code() is False
-
-
-def test_has_generated_code_frontend_files():
-    """output/ 下只有前端文件（index.html 等，无 .py）也算已有代码。"""
+def test_seed_message_on_reused_run_dir(monkeypatch):
+    """--run 复用已有 spec 的目录时，播种现状消息（不跑模型）。"""
+    runtime.spec_path().write_text("# spec", encoding="utf-8")
     out = runtime.output_dir()
     out.mkdir(parents=True, exist_ok=True)
-    (out / "index.html").write_text("<html></html>", encoding="utf-8")
-    assert session.has_generated_code() is True
+    (out / "game.js").write_text("// x", encoding="utf-8")
+
+    _feed(monkeypatch, "继续", "/exit")
+    captured: dict[str, list] = {}
+
+    def fake(messages, line, **kwargs):
+        captured["users"] = [m["content"] for m in messages if m["role"] == "user"]
+        return "ok"
+
+    monkeypatch.setattr(session, "continue_turn", fake)
+    session.run_interactive_session()
+
+    # 播种消息在历史里（read spec 指引 + 已有文件清单），且未消耗模型轮次
+    assert any("spec.md" in c and "game.js" in c for c in captured["users"])
 
 
-def test_handle_command_clear_cancel(monkeypatch):
-    """/clear 且用户不确认（N）→ 取消，不执行清理。"""
-    monkeypatch.setattr(interactive, "prompt_human", lambda prompt: "n")
+# ---------- 斜杠命令 ----------
+
+
+def test_code_command_translates_to_input(monkeypatch):
+    """/code 不走本地路由，翻译成对话输入交给模型（prompt 模板，非分支）。"""
+    _feed(monkeypatch, "/code", "/exit")
+    seen = []
+
+    def fake(messages, line, **kwargs):
+        seen.append(line)
+        return "ok"
+
+    monkeypatch.setattr(session, "continue_turn", fake)
+    session.run_interactive_session()
+    assert len(seen) == 1
+    assert "spec.md" in seen[0] and "编码" in seen[0]
+
+
+def test_spec_command_shows_spec(monkeypatch):
+    """/spec 显示当前 spec.md 内容。"""
+    runtime.spec_path().write_text("# 我的 spec", encoding="utf-8")
     printed = []
-    monkeypatch.setattr(session.console, "print", lambda *a, **k: printed.append(a))
-    assert session._handle_command("/clear") == "continue"
-    assert any("已取消" in str(x) for x in printed)
+    _feed(monkeypatch, "/spec", "/exit")
+    monkeypatch.setattr(session, "Panel", lambda *a, **k: a[0])  # 桩掉 rich Panel，取原始文本
+    monkeypatch.setattr(session.console, "print", lambda *a, **k: printed.append(str(a)))
+    session.run_interactive_session()
+    assert any("我的 spec" in x for x in printed)
 
 
-# ---------- 需求确认环节 _confirm_requirements ----------
-
-
-def test_confirm_no_extra_then_prompt_code(monkeypatch):
-    """用户回车（无补充）→ 提示输入编码，不再次跑 agent。"""
-    monkeypatch.setattr(interactive, "prompt_human", lambda prompt: "")
+def test_spec_command_without_spec(monkeypatch):
+    """/spec 无 spec 时提示先输入需求。"""
     printed = []
-    monkeypatch.setattr(session.console, "print", lambda *a, **k: printed.append(a))
-    called = {"n": 0}
-
-    def fake(sp, um, **kw):
-        called["n"] += 1
-        return "[DONE]"
-
-    monkeypatch.setattr(session, "run_interactive", fake)
-    session._confirm_requirements("auto", True)
-    assert called["n"] == 0
-    assert any("需求确认完毕" in str(x) for x in printed)
+    _feed(monkeypatch, "/spec", "/exit")
+    monkeypatch.setattr(session.console, "print", lambda *a, **k: printed.append(str(a)))
+    session.run_interactive_session()
+    assert any("还没有 spec.md" in x for x in printed)
 
 
-def test_confirm_with_extra_integrates_then_prompt_code(monkeypatch):
-    """用户补充内容 → 让 agent 整合进 spec；再回车 → 结束。"""
-    answers = iter(["加一个计分系统", ""])
-    monkeypatch.setattr(interactive, "prompt_human", lambda prompt: next(answers))
-    called = {"n": 0}
-
-    def fake(sp, um, **kw):
-        called["n"] += 1
-        assert "加一个计分系统" in um  # 补充内容传给 agent
-        return "[DONE] 已整合"
-
-    monkeypatch.setattr(session, "run_interactive", fake)
-    session._confirm_requirements("auto", True)
-    assert called["n"] == 1
-
-
-def test_confirm_ctrl_c_exits(monkeypatch):
-    """确认环节 Ctrl-C → 正常提示，不抛异常。"""
-    def _ctrl_c(prompt):
-        raise KeyboardInterrupt
-    monkeypatch.setattr(interactive, "prompt_human", _ctrl_c)
+def test_unknown_command_hint(monkeypatch):
+    """未知命令 → 提示 /help，不进模型。"""
+    _feed(monkeypatch, "/foo", "/exit")
+    called = []
+    monkeypatch.setattr(session, "continue_turn", lambda *a, **k: called.append(a) or "ok")
     printed = []
-    monkeypatch.setattr(session.console, "print", lambda *a, **k: printed.append(a))
-    session._confirm_requirements("auto", True)
-    assert any("需求确认完毕" in str(x) for x in printed)
+    monkeypatch.setattr(session.console, "print", lambda *a, **k: printed.append(str(a)))
+    session.run_interactive_session()
+    assert called == []
+    assert any("未知命令" in x for x in printed)
 
 
-def test_confirm_code_intent_starts_coding(monkeypatch):
-    """确认环节用户说"编码吧" → 直接进入编码，不当作补充需求。"""
-    monkeypatch.setattr(interactive, "prompt_human", lambda prompt: "编码吧")
-    code_called = []
-    monkeypatch.setattr(session, "run_code", lambda ins, sm, st: code_called.append(ins))
-    monkeypatch.setattr(session, "run_interactive", lambda *a, **k: "[DONE]")
-    session._confirm_requirements("auto", True)
-    assert code_called == ["编码吧"]
+def test_clear_resets_history_and_files(monkeypatch):
+    """/clear 删除 spec/output，并重置对话历史（防旧讨论误导模型）。"""
+    runtime.spec_path().write_text("# spec", encoding="utf-8")
+    out = runtime.output_dir()
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "game.js").write_text("// x", encoding="utf-8")
+
+    _feed(monkeypatch, "帮我写游戏", "/clear", "y", "再来一个", "/exit")
+    total_lengths: list[int] = []
+
+    def fake(messages, line, **kwargs):
+        total_lengths.append(len(messages))
+        messages.append({"role": "user", "content": line})
+        messages.append({"role": "assistant", "content": "ok"})
+        return "ok"
+
+    monkeypatch.setattr(session, "continue_turn", fake)
+    session.run_interactive_session()
+
+    assert not runtime.spec_path().exists()
+    assert not (out / "game.js").exists()
+    # 第 1 轮开局 = system + 播种消息（spec 已存在时注入现状）；
+    # /clear 重置后第 2 轮只剩 system —— 历史确实被清了
+    assert total_lengths == [2, 1]
 
 
-def test_confirm_done_phrase_exits(monkeypatch):
-    """确认环节用户说"没有补充了" → 退出确认，不当作补充整合。"""
-    monkeypatch.setattr(interactive, "prompt_human", lambda prompt: "没有补充了")
+# ---------- 哨兵收尾 ----------
+
+
+def test_error_sentinel_prints_footer(monkeypatch):
+    """流式模式下错误哨兵给一句收尾提示（正常回复已实时显示）。"""
+    _feed(monkeypatch, "帮我写游戏", "/exit")
+    monkeypatch.setattr(session, "continue_turn", lambda m, l, **k: "[ERR] 某工具执行失败")
     printed = []
-    monkeypatch.setattr(session.console, "print", lambda *a, **k: printed.append(a))
-    integrate_called = []
-    monkeypatch.setattr(session, "run_interactive", lambda *a, **k: integrate_called.append(1))
-    session._confirm_requirements("auto", True)
-    assert integrate_called == []  # 未触发整合
-    assert any("需求确认完毕" in str(x) for x in printed)
+    monkeypatch.setattr(session.console, "print", lambda *a, **k: printed.append(str(a)))
+    session.run_interactive_session()
+    assert any("[ERR]" in x for x in printed)
+
+
+def test_empty_input_ignored(monkeypatch):
+    """空行/纯空白不触发任何动作。"""
+    _feed(monkeypatch, "  ", "", "/exit")
+    called = []
+    monkeypatch.setattr(session, "continue_turn", lambda *a, **k: called.append(a) or "ok")
+    session.run_interactive_session()
+    assert called == []

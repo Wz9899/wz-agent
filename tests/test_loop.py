@@ -204,86 +204,42 @@ def test_retry_on_messages_retries_err_then_succeeds(monkeypatch):
     assert calls["n"] == 3
 
 
-# ---------- run_interactive ----------
+# ---------- continue_turn（单循环会话轮次）----------
 
 
-def test_run_interactive_non_interactive_degrades(monkeypatch):
-    """ENABLED=False 时退化为单次 run / run_with_retry。"""
-    monkeypatch.setattr(interactive, "ENABLED", False)
+def test_continue_turn_appends_user_and_delegates(monkeypatch):
+    """continue_turn 追加用户消息后交给 _run_with_retry_on_messages，不重建历史。"""
     captured = {}
 
-    def fake_run(sp, um, **kwargs):
-        captured["run"] = True
-        return "run-result"
-
-    monkeypatch.setattr(loop, "run", fake_run)
-    assert loop.run_interactive("sp", "um", retry=False) == "run-result"
-    assert captured.get("run")
-
-
-def test_run_interactive_dialogue_flow(monkeypatch):
-    """多轮对话：问题→回答→问题→回答→[DONE]，回答累积进历史。"""
-    monkeypatch.setattr(interactive, "ENABLED", True)
-    answers = iter(["Python", "网页"])
-    monkeypatch.setattr(interactive, "prompt_human", lambda prompt: next(answers))
-    results = iter(["用什么语言？", "命令行还是网页？", "[DONE] 已写入 spec.md"])
-    seen: list[list[str]] = []
-
-    def fake_run_loop(messages, **kwargs):
-        seen.append([m["content"] for m in messages if m["role"] == "user"])
-        return next(results)
-
-    monkeypatch.setattr(loop, "_run_loop", fake_run_loop)
-    out = loop.run_interactive("sp", "帮我写游戏", retry=False)
-    assert out == "[DONE] 已写入 spec.md"
-    # 第 1 轮只有初始任务；第 2 轮含第一个回答；第 3 轮含两个回答
-    assert seen[0] == ["帮我写游戏"]
-    assert seen[1] == ["帮我写游戏", "Python"]
-    assert seen[2] == ["帮我写游戏", "Python", "网页"]
-
-
-def test_run_interactive_exit_aborts(monkeypatch):
-    monkeypatch.setattr(interactive, "ENABLED", True)
-    monkeypatch.setattr(interactive, "prompt_human", lambda prompt: "exit")
-    monkeypatch.setattr(loop, "_run_loop", lambda messages, **kw: "一个问题")
-    out = loop.run_interactive("sp", "um", retry=False)
-    assert out == "[ABORT] 用户主动退出对话。"
-
-
-def test_run_interactive_clarify_never_streams(monkeypatch):
-    """澄清对话（retry=False）不流式展示思考——即使传入 stream=True 也强制关闭。"""
-    monkeypatch.setattr(interactive, "ENABLED", True)
-    streams: list[bool] = []
-    results = iter(["[DONE] 完成"])
-
-    def fake_run_loop(messages, **kwargs):
-        streams.append(kwargs.get("stream"))
-        return next(results)
-
-    monkeypatch.setattr(loop, "_run_loop", fake_run_loop)
-    loop.run_interactive("sp", "um", retry=False, stream=True)
-
-    assert streams == [False]
-
-
-def test_run_interactive_code_autonomous(monkeypatch):
-    """code（retry=True）自主执行：跑完一轮即返回，不进入对话循环等回答。"""
-    monkeypatch.setattr(interactive, "ENABLED", True)
-    calls = {"n": 0}
-
     def fake_retry(messages, **kwargs):
-        calls["n"] += 1
-        return "[DONE] 全部模块完成"
+        captured["users"] = [m["content"] for m in messages if m["role"] == "user"]
+        captured["stream"] = kwargs.get("stream")
+        return "ok"
 
     monkeypatch.setattr(loop, "_run_with_retry_on_messages", fake_retry)
+    messages = [{"role": "system", "content": "sp"}]
+    out = loop.continue_turn(messages, "帮我写游戏", stream=True)
 
-    def _should_not_prompt(prompt):
-        raise AssertionError("code 自主执行不应等用户回答")
-    monkeypatch.setattr(interactive, "prompt_human", _should_not_prompt)
+    assert out == "ok"
+    assert captured["users"] == ["帮我写游戏"]  # 消息已 append 进同一份历史
+    assert captured["stream"] is True            # 流式开关透传
 
-    out = loop.run_interactive("sp", "um", retry=True)
-    assert out == "[DONE] 全部模块完成"
-    assert calls["n"] == 1  # 只跑一轮
+
+def test_continue_turn_keeps_history(monkeypatch):
+    """多轮 continue_turn 共用同一份 messages（跨轮持久的单循环不变量）。"""
+    seen = []
+
+    def fake_retry(messages, **kwargs):
+        seen.append([m["content"] for m in messages if m["role"] == "user"])
+        # 模拟 LLM 回复入史（真实路径在 _run_loop 内部）
+        messages.append({"role": "assistant", "content": "ok"})
+        return "ok"
+
+    monkeypatch.setattr(loop, "_run_with_retry_on_messages", fake_retry)
+    messages = [{"role": "system", "content": "sp"}]
+    loop.continue_turn(messages, "第一轮")
+    loop.continue_turn(messages, "第二轮")
+    assert seen == [["第一轮"], ["第一轮", "第二轮"]]
 
 
 def test_run_loop_handles_invalid_json_args(monkeypatch):

@@ -2,7 +2,7 @@
 
 一个从零手搓的通用编码助手——主动追问需求，自动生成代码。
 
-> ✅ 当前版本：v2.1 — 子 agent 派发（task 工具）+ Windows bash 修复
+> ✅ 当前版本：v2.2 — 单循环会话重构（删意图分类器，模型自路由）
 
 ## 功能规划
 
@@ -16,7 +16,8 @@
 | v1.0 | CLI 完整交互 + bash 安全模式 | ✅ |
 | v2.0 | triage（issue 分诊）+ to-tickets（任务拆解） | ✅ |
 | v2.1 | 子 agent 派发（task 工具，LLM 自主决策）+ Windows bash 修复 | ✅ |
-| v2.2 | ticket ↔ code 阶段自动衔接 | 📋 |
+| v2.2 | 单循环会话重构：删意图分类器，基座提示模型自路由 | ✅ |
+| v2.3 | ticket ↔ code 阶段自动衔接 | 📋 |
 
 ## 技术栈
 
@@ -71,17 +72,20 @@ cp .env.example .env   # 然后编辑 .env 填入 Key
 # 最简方式：不传任务，启动后实时输入你的需求（run.bat 即此模式）
 python src/main.py
 
-# 或直接把任务写进命令：
+# 或直接把任务写进命令（播种进会话，后续照常对话）
 python src/main.py "帮我写一个猜人游戏"
 
-# 阶段二：编码执行（需要先有 spec.md）
-python src/main.py --phase code "请根据 spec.md 实现项目"
+# 会话内：说需求 → agent 逐轮问清写 spec.md → 输入 /code 开始编码
+#         → 直接说修改意见，agent 精准修改 —— 全程同一个对话上下文
 
-# 阶段三：issue 分诊（triage 状态机，五档标签）
+# issue 分诊（triage 状态机，五档标签，全自动）
 python src/main.py triage <feature-slug 或 issue 文件路径>
 
-# 阶段四：任务拆解（spec → 垂直切片 tickets）
+# 任务拆解（spec → 垂直切片 tickets，全自动）
 python src/main.py to-tickets <feature-slug 或 spec 文件路径>
+
+# headless：不进会话，带任务参数一次性跑完（脚本化场景）
+python src/main.py "帮我写一个猜人游戏" --no-interactive
 
 # plan 模式：先收集命令，再批量执行
 python src/main.py "帮我写一个猜人游戏" --safety-mode plan
@@ -90,9 +94,10 @@ python src/main.py "帮我写一个猜人游戏" --safety-mode plan
 > 💡 默认**流式输出**：agent 的思考与工具调用过程会实时打印，方便观察与随时 `Ctrl-C` 中断；
 > 加 `--no-stream` 可关闭（等待完整结果后一次性返回）。
 >
-> 💡 默认**监督式执行**：clarify 阶段 agent 会问你问题（`ask_user`）；code 阶段按模块
-> 自主执行、每完成一个模块汇报进度（`checkpoint`，不停下等待）；**随时 `Ctrl-C` 中断**
-> （继续 / 注入指令 / 停止）。加 `--no-interactive` 可关闭交互。triage / to-tickets 始终全自动。
+> 💡 **单循环会话（v2.2）**：澄清、编码、修改、问答在同一个对话里，由 agent 根据对话
+> 状态自行路由（需要确定性时用 `/code` 显式触发）。需求澄清时 agent 会问你问题
+> （`ask_user`）；编码时按模块自主执行、每完成一个模块汇报进度（`checkpoint`，不停下
+> 等待）；**随时 `Ctrl-C` 中断**（继续 / 注入指令 / 停止）。triage / to-tickets 始终全自动。
 
 ## 安全边界
 
@@ -129,5 +134,5 @@ wz-agent/
         ├── context.py      # spec.md 定位/读写/注入
         ├── issues.py       # .scratch/ issue 文件操作层（v2.0）
         ├── tools/          # read/write/edit/bash/task + triage/tickets 工具
-        └── prompts/        # clarify / code / triage / to-tickets 四套 prompt
+        └── prompts/        # base（单循环基座）/ triage / to-tickets 提示
 ```
