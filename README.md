@@ -19,7 +19,7 @@
 | v2.2 | 单循环会话重构：删意图分类器，基座提示模型自路由 | ✅ |
 | v2.3 | 目标项目锚定（-C，删 output/ 沙箱）+ 进度文档 PROGRESS.md + git 边界（harness 零 git） | ✅ |
 | v2.4 | 工具工厂化（修共享单例竞态）+ task 并行扇出（fan_out，只读护栏） | ✅ |
-| v2.5 | ticket ↔ code 阶段自动衔接 | 📋 |
+| v2.5 | 按票实现（票即任务：逐票派 coder、置 done、PROGRESS 记账）+ triage 评论模板 | ✅ |
 
 ## 技术栈
 
@@ -79,6 +79,8 @@ python src/main.py -C /path/to/your-project "帮我加一个计分功能"
 
 # 会话内：说需求 → agent 逐轮问清写 spec.md → 输入 /code 开始编码
 #         → 直接说修改意见，agent 精准修改 —— 全程同一个对话上下文
+# 按票实现：to-tickets 拆票 + triage 分诊后，/code 自动逐票实现（票即任务）
+#         ready-for-agent 的票逐张派 coder 子 agent，验收置 done，PROGRESS.md 记账
 
 # issue 分诊（triage 状态机，五档标签，全自动）
 python src/main.py -C /path/to/your-project triage <feature-slug 或 issue 文件路径>

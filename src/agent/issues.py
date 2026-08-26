@@ -18,17 +18,22 @@ from pathlib import Path
 from agent import paths
 from agent.paths import SCRATCH_DIRNAME
 
-# 五个标准 triage 标签（与 docs/agents/triage-labels.md 保持一致）
+# 六个标准 triage 标签（与 docs/agents/triage-labels.md 保持一致；
+# done 为 v2.5 新增：实现完成，与五个分诊档位共同构成完整生命周期）
 VALID_LABELS: tuple[str, ...] = (
     "needs-triage",
     "needs-info",
     "ready-for-agent",
     "ready-for-human",
     "wontfix",
+    "done",
 )
 
 # 匹配 "Status: xxx" 行（行首，允许多余空白）
 _STATUS_RE = re.compile(r"^Status:\s*(.+?)\s*$", re.MULTILINE)
+
+# 匹配 "Blocked by: 01, 03" 行（无依赖写法不限，如 "（无）"；解析不到返回空）
+_BLOCKED_BY_RE = re.compile(r"^Blocked by:\s*(.+?)\s*$", re.MULTILINE)
 
 
 # ============================================================
@@ -148,6 +153,28 @@ def get_status(path: Path) -> str | None:
         return None
     m = _STATUS_RE.search(content)
     return m.group(1).strip() if m else None
+
+
+def get_blocked_by(path: Path) -> list[str]:
+    """读取 issue 的 Blocked by 依赖列表（票号字符串，如 ["01", "03"]）。
+
+    解析 "Blocked by: 01, 03" 行：逗号/顿号/空白分隔，只保留纯数字项；
+    无依赖行、行内无有效编号（如 "（无）"）→ 空列表。
+    """
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+    m = _BLOCKED_BY_RE.search(content)
+    if not m:
+        return []
+    parts = [p.strip() for p in re.split(r"[,，、\s]+", m.group(1)) if p.strip()]
+    return [p for p in parts if p.isdigit()]
+
+
+def ticket_stem(path: Path) -> str:
+    """issue 文件名去后缀的编号（如 02-auth-flow → "02"）。"""
+    return path.stem.split("-", 1)[0]
 
 
 def set_status(path: Path, label: str, comment: str = "") -> str:

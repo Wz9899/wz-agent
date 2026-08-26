@@ -46,6 +46,10 @@ make_tools() 每次调用构造一组全新工具实例（名字→类的目录 
 task 工具的 fan_out 参数传多个互不依赖的子问题，线程池并行调查、结果按子问题原序聚合返回。只读护栏（工具集含 write/edit 的 agent 拒绝并行——并行写需 worktree 隔离，暂不引入）+ 成本护栏（MAX_FAN_OUT=4）。Ctrl-C 中断由 _run_loop 的中断菜单接管。
 _Avoid_: 持久队友/邮箱/任务板（L3 团队机制）——需要时用 tmux 起多实例，或到时候再评估；worktree 隔离——等真实写冲突出现再付这个复杂度。
 
+**按票实现（v2.5，票即任务）**：
+编码指令到达时，若目标项目有 .scratch/ 且存在 Status=ready-for-agent 的票，则逐票实现：按票号顺序 + Blocked by 行跳过未就绪票 → 每票串行派 coder 子 agent（一票一任务，票内容自包含）→ 验收通过则 set_issue_status 置 done + 评论 → 同步 PROGRESS.md（按票记账）。失败 3 次的票退回 needs-info 并问用户。标签表新增 done（由实现流程置入，分诊不主动打）。这是 .scratch/ issue 线的消费端：to-tickets（拆解）→ triage（分诊）→ 按票实现（执行）→ PROGRESS（记账）闭环。
+_Avoid_: 任务依赖图/claim/owner（s10 全家桶）——垂直切片刻意无依赖，票号顺序 + Blocked by 行已够；并行实现多票——写操作不并行（同 v2.4 只读护栏），等真实需求再评估 worktree。
+
 **自动修复**：
 编码执行时遇到错误（测试失败、编译报错），自动将错误信息喂给 LLM，让其自行修复，最多 3 次。超过 3 次停下来问用户。
 

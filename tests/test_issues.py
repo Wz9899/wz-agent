@@ -200,3 +200,50 @@ def test_resolve_spec_target_file_path(tmp_path):
     feature, path = issues.resolve_spec_target(str(f))
     assert feature == "some"  # 非 .scratch 形态时兜底取父目录名
     assert path == f
+
+
+# ---------- v2.5：done 标签 / Blocked by 解析 / 票号 ----------
+
+
+def test_done_is_valid_label():
+    """done 进入合法标签表（实现流程置入；分诊不主动打）。"""
+    assert "done" in issues.VALID_LABELS
+
+
+def test_get_blocked_by_parses_numbers():
+    """Blocked by 行解析：逗号/顿号/空白分隔，只留纯数字。"""
+    p = issues.issues_dir("demo") / "03-tests.md"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(
+        "# 测试\n\nStatus: ready-for-agent\nBlocked by: 01, 03\n\n正文",
+        encoding="utf-8",
+    )
+    assert issues.get_blocked_by(p) == ["01", "03"]
+
+
+def test_get_blocked_by_none_and_missing():
+    """无依赖行 / "（无）" / 文件不存在 → 空列表。"""
+    p = issues.issues_dir("demo") / "01-base.md"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("# 基础\n\nBlocked by:（无）\n", encoding="utf-8")
+    assert issues.get_blocked_by(p) == []
+
+    p2 = issues.issues_dir("demo") / "no-file.md"
+    assert issues.get_blocked_by(p2) == []
+
+
+def test_ticket_stem():
+    """文件名提取票号（02-auth-flow → 02）。"""
+    from pathlib import Path
+    assert issues.ticket_stem(Path("02-auth-flow.md")) == "02"
+
+
+def test_set_status_done_roundtrip():
+    """置 done 后可读回（实现流程的状态闭环）。"""
+    p = issues.issues_dir("demo") / "04-x.md"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("# x\n\nStatus: ready-for-agent\n\n## Comments\n", encoding="utf-8")
+    result = issues.set_status(p, "done", comment="已实现，验收通过")
+    assert not result.startswith("[ERR]")
+    assert issues.get_status(p) == "done"
+    assert "已实现" in p.read_text(encoding="utf-8")

@@ -69,6 +69,7 @@
 | 工具工厂 | `tools/__init__.py` —— TOOL_CLASSES 目录 + make_tools() 每循环全新实例，删 ALL_TOOLS 单例；plan 生命周期对齐一次 _run_loop | ✅ |
 | schema 类型修复 | `tools/base.py` —— eval_str 求值注解 + list→array + X\|None 解包（append 的 boolean 此前一直误判 string） | ✅ |
 | 并行扇出 | `tools/task.py` —— fan_out 线程池并行调查，按序聚合；只读护栏 + MAX_FAN_OUT=4；Ctrl-C 走中断菜单 | ✅ 144 测试全绿 |
+| 按票实现（票即任务） | `base.py` 模式二之按票流程 + `issues.py` done 标签/get_blocked_by/ticket_stem + triage 评论模板 —— to-tickets→triage→逐票派 coder→置 done→PROGRESS 记账，issue 线闭环 | ✅ 149 测试全绿 |
 | git 边界 | harness 零 git 调用；agent 可读不可写（prompt 级）；/clear 只删 spec 不碰项目文件 | ✅ 136 测试全绿 |
 
 ## 待完成
@@ -84,7 +85,7 @@
 | v2.2 | 单循环会话重构：删意图分类器，基座提示模型自路由 | ✅ |
 | v2.3 | 目标项目锚定（-C + set_target，删 output/ 沙箱）+ git 边界（harness 零 git） | ✅ |
 | v2.4 | 工具工厂化（修共享单例竞态）+ task 并行扇出（fan_out，只读护栏） | ✅ |
-| v2.5 | triage 批量评论模板、ticket ↔ code 自动衔接 | 📋 |
+| v2.5 | 按票实现（票即任务：逐票派 coder，置 done，PROGRESS 记账）+ triage 评论模板 | ✅ |
 
 ## 技术选型
 
