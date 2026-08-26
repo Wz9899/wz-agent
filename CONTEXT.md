@@ -48,6 +48,10 @@ Agent 可调用的四个基础能力：
 - **计划模式** — agent 列出命令清单，用户确认后批量执行，适合高风险操作
 _Avoid_: 无限制直接执行
 
+**进度文档（项目快照，v2.3）**：
+目标项目根的 `PROGRESS.md`，agent 编码时用 write/edit 同步维护（每完成一个模块更新已完成/待完成/关键决策），会话启动时先读它接上进度。它是项目进度的对外窗口：任何人在任何时候打开就能知道开发到哪了。这就是"不建记忆系统"的替代物——跨会话状态 = spec.md（需求）+ PROGRESS.md（进度），文件即状态，零记忆机制。命名沿用 wz-agent 自身仓库的 PROGRESS.md 惯例。
+_Avoid_: 用 Python 自动生成（判断归模型：agent 用现有 write/edit 维护）；把进度记到对话历史里（压缩即丢）；与 git 版本快照混淆（那是用户自己的 git 的事）。
+
 **git 边界（v2.3 决策）**：
 harness 零 git —— Python 代码不执行任何 git 命令，对任意目录可用；agent 经 bash 可读不可写（查 status/log/diff 帮助理解项目允许，commit/push/reset/checkout 等写操作禁止，prompt 级软约束）；版本控制、快照、回滚完全由用户自己用 git 管理，/clear 绝不碰项目文件。
 _Avoid_: 自动 commit/还原点/权限弹窗类"安全功能"——那是用户的部署决策，不是产品功能（与 pi 立场一致）。

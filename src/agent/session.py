@@ -24,7 +24,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
 
-from agent import interactive, runtime
+from agent import interactive, paths, runtime
 from agent.context import ensure_spec, spec_exists
 from agent.loop import continue_turn
 from agent.prompts.base import build_system_prompt
@@ -40,29 +40,36 @@ _EXIT_WORDS = frozenset({"exit", "quit", "q", "退出"})
 # /code 命令的提示词译文：把用户显式意图翻译成对话输入，而非路由分支
 _CODE_COMMAND_INPUT = (
     "（用户命令 /code）请按 spec.md 开始编码实现。"
+    "若 PROGRESS.md 已存在，先 read 它接上进度再继续；"
     "项目里已有代码时先 read 现状，增量开发。"
 )
+
+
+def _progress_path() -> Path:
+    """进度文档路径 —— 目标项目根 PROGRESS.md（项目快照，随项目走）。"""
+    return paths.target_root() / "PROGRESS.md"
 
 
 def _print_help() -> None:
     console.print("[cyan]可用命令:[/]")
     console.print("  [bold]/help[/]   显示本帮助")
-    console.print("  [bold]/spec[/]   查看当前 spec.md 内容")
+    console.print("  [bold]/spec[/]     查看当前 spec.md 内容")
+    console.print("  [bold]/progress[/] 查看进度文档 PROGRESS.md")
     console.print("  [bold]/code[/]   开始编码执行（按 spec.md 实现）")
     console.print("  [bold]/clear[/]  删除 spec.md 并重置对话（项目文件不动；代码回滚自己用 git）")
     console.print("  [bold]/exit[/]   退出会话（或输入 exit / q / Ctrl-C）")
     console.print("")
     console.print("直接输入:")
     console.print("  [bold]<需求描述>[/]  需求澄清：agent 逐轮问清后写 spec.md")
-    console.print("  [bold]<修改意见>[/]  已有代码后直接说，agent 会精准修改")
+    console.print("  [bold]<修改意见>[/]  已有代码后直接说，agent 会精准修改并同步 PROGRESS.md")
     console.print("  [bold]<提问>[/]      直接回答，不写文件")
 
 
 def _clear_session() -> None:
     """删除 spec.md 并重置对话（需确认）。
 
-    项目里的代码文件**绝不动**——那是用户用自己的 git 管理的事；
-    本命令只重置 wz-agent 自己的状态（spec + 对话历史）。
+    项目里的代码文件与 PROGRESS.md **绝不动**——那是用户用自己的 git
+    管理的事；本命令只重置 wz-agent 自己的状态（spec + 对话历史）。
     """
     try:
         confirm = interactive.prompt_human(
@@ -84,13 +91,24 @@ def _clear_session() -> None:
 
 
 def _seed_message() -> str:
-    """目标项目已有 spec.md 时的现状播种消息（只告知，不跑模型）。"""
-    if not spec_exists():
+    """目标项目已有 spec.md / PROGRESS.md 时的现状播种消息（只告知，不跑模型）。"""
+    notes: list[str] = []
+    if spec_exists():
+        notes.append(
+            f"（会话恢复）目标项目根已存在 spec.md（{runtime.spec_path()}），"
+            f"请先 read 它了解需求。"
+        )
+    progress = _progress_path()
+    if progress.is_file():
+        notes.append(
+            "目标项目根已存在 PROGRESS.md"
+            f"（{progress}）——请先 read 它接上上次的进度，"
+            "不要重复已完成的工作。"
+        )
+    if not notes:
         return ""
-    return (
-        f"（会话恢复）目标项目根已存在 spec.md（{runtime.spec_path()}），"
-        f"请先 read 它了解需求；项目现状自行用 read/ls 探索后再动手。"
-    )
+    notes.append("项目现状自行用 read/ls 探索后再动手。")
+    return "".join(notes)
 
 
 def run_interactive_session(
@@ -166,7 +184,8 @@ def run_interactive_session(
                 _print_help()
             elif cmd == "/clear":
                 _clear_session()
-                # 清空后重置对话：spec 已不存在，历史里的旧讨论会误导模型
+                # 清空后重置对话：spec 已不存在，历史里的旧讨论会误导模型。
+                # PROGRESS.md 保留 —— 进度是项目工件，与代码同生死，不随对话重置
                 messages[:] = [messages[0]]
                 console.print("[yellow]已重置对话历史。[/]")
             elif cmd == "/spec":
@@ -174,6 +193,12 @@ def run_interactive_session(
                     console.print(Panel(ensure_spec(), title="spec.md"))
                 else:
                     console.print("[yellow]还没有 spec.md —— 先输入需求。[/]")
+            elif cmd == "/progress":
+                progress = _progress_path()
+                if progress.is_file():
+                    console.print(Panel(progress.read_text(encoding="utf-8"), title="PROGRESS.md"))
+                else:
+                    console.print("[yellow]还没有 PROGRESS.md —— 编码时 agent 会创建并维护它。[/]")
             elif cmd == "/code":
                 _turn(_CODE_COMMAND_INPUT)
             else:

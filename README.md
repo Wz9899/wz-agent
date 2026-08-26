@@ -2,7 +2,7 @@
 
 一个从零手搓的通用编码助手——主动追问需求，自动生成代码。
 
-> ✅ 当前版本：v2.3 — 目标项目锚定（agent 直接在你的项目里工作）
+> ✅ 当前版本：v2.3 — 目标项目锚定 + 进度文档（agent 直接在你的项目里工作，同步维护 PROGRESS.md）
 
 ## 功能规划
 
@@ -17,7 +17,7 @@
 | v2.0 | triage（issue 分诊）+ to-tickets（任务拆解） | ✅ |
 | v2.1 | 子 agent 派发（task 工具，LLM 自主决策）+ Windows bash 修复 | ✅ |
 | v2.2 | 单循环会话重构：删意图分类器，基座提示模型自路由 | ✅ |
-| v2.3 | 目标项目锚定（-C，删 output/ 沙箱）+ git 边界（harness 零 git） | ✅ |
+| v2.3 | 目标项目锚定（-C，删 output/ 沙箱）+ 进度文档 PROGRESS.md + git 边界（harness 零 git） | ✅ |
 | v2.4 | ticket ↔ code 阶段自动衔接 | 📋 |
 
 ## 技术栈
@@ -99,6 +99,10 @@ python src/main.py "帮我写一个猜人游戏" --safety-mode plan
 > 状态自行路由（需要确定性时用 `/code` 显式触发）。需求澄清时 agent 会问你问题
 > （`ask_user`）；编码时按模块自主执行、每完成一个模块汇报进度（`checkpoint`，不停下
 > 等待）；**随时 `Ctrl-C` 中断**（继续 / 注入指令 / 停止）。triage / to-tickets 始终全自动。
+>
+> 💡 **进度文档（v2.3，项目快照）**：编码时 agent 同步维护目标项目的 `PROGRESS.md`
+> （已完成/待完成/关键决策）——任何人在任何时候打开它就知道开发到哪了；下次会话
+> agent 先读它接上进度，不建记忆系统。`/progress` 随时查看。
 
 ## 安全边界
 

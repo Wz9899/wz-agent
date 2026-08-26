@@ -65,7 +65,8 @@
 | 单循环会话重构 | `prompts/base.py` + `loop.py:continue_turn` + `session.py` 重写 —— 删意图分类器与三层会话，澄清/编码/修改在同一对话模型自路由；[DONE] 协议退役 | ✅ 129 测试全绿 |
 | 播种会话 | `main.py` —— 命令行任务参数直接进 REPL（pi 式），删 --phase；--no-interactive 保留 headless 出口 | ✅ |
 | 目标项目锚定 | `paths.set_target` + `main.py -C` —— agent 直接在目标项目工作，spec/.scratch/落目标根；runs/ 只留转录（目录名带项目名）；删 output/ 沙箱 | ✅ |
-| git 边界 | harness 零 git 调用；agent 可读不可写（prompt 级）；/clear 只删 spec 不碰项目文件 | ✅ 133 测试全绿 |
+| 进度文档（项目快照） | `base.py` prompt 纪律 + `/progress` 命令 —— 编码时同步维护目标项目 PROGRESS.md，会话启动先读它接上进度；跨会话状态 = spec + PROGRESS，零记忆机制 | ✅ |
+| git 边界 | harness 零 git 调用；agent 可读不可写（prompt 级）；/clear 只删 spec 不碰项目文件 | ✅ 136 测试全绿 |
 
 ## 待完成
 

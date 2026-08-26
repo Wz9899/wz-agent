@@ -109,10 +109,11 @@ def test_messages_persist_across_turns(monkeypatch):
 
 
 def test_system_prompt_contains_runtime_paths():
-    """系统提示含目标项目根与 spec.md 绝对路径（权威声明）。"""
+    """系统提示含目标项目根、spec.md、PROGRESS.md 绝对路径（权威声明）。"""
     prompt = session.build_system_prompt()
     assert str(paths.target_root()) in prompt
     assert str(runtime.spec_path()) in prompt
+    assert "PROGRESS.md" in prompt
 
 
 def test_seed_runs_first_turn(monkeypatch):
@@ -129,9 +130,9 @@ def test_seed_runs_first_turn(monkeypatch):
     assert seen == ["帮我写一个猜人游戏"]
 
 
-def test_seed_message_on_reused_target(monkeypatch):
-    """目标项目已有 spec.md 时，播种现状消息（不跑模型）。"""
-    runtime.spec_path().write_text("# spec", encoding="utf-8")
+def test_seed_message_mentions_progress(monkeypatch):
+    """目标项目已有 PROGRESS.md 时，播种消息要求先读它接上进度。"""
+    (paths.target_root() / "PROGRESS.md").write_text("# 已完成 x", encoding="utf-8")
 
     _feed(monkeypatch, "继续", "/exit")
     captured: dict[str, list] = {}
@@ -143,8 +144,40 @@ def test_seed_message_on_reused_target(monkeypatch):
     monkeypatch.setattr(session, "continue_turn", fake)
     session.run_interactive_session()
 
-    # 播种消息在历史里（read spec 指引），且未消耗模型轮次
-    assert any("spec.md" in c for c in captured["users"])
+    assert any("PROGRESS.md" in c and "进度" in c for c in captured["users"])
+
+
+def test_progress_command_shows_doc(monkeypatch):
+    """/progress 显示进度文档内容。"""
+    (paths.target_root() / "PROGRESS.md").write_text("# 进度\n- 模块A ✅", encoding="utf-8")
+    printed = []
+    _feed(monkeypatch, "/progress", "/exit")
+    monkeypatch.setattr(session, "Panel", lambda *a, **k: a[0])
+    monkeypatch.setattr(session.console, "print", lambda *a, **k: printed.append(str(a)))
+    session.run_interactive_session()
+    assert any("模块A" in x for x in printed)
+
+
+def test_progress_command_without_doc(monkeypatch):
+    """/progress 无文档时提示编码时会创建。"""
+    printed = []
+    _feed(monkeypatch, "/progress", "/exit")
+    monkeypatch.setattr(session.console, "print", lambda *a, **k: printed.append(str(a)))
+    session.run_interactive_session()
+    assert any("还没有 PROGRESS.md" in x for x in printed)
+
+
+def test_clear_keeps_progress_doc(monkeypatch):
+    """/clear 不删 PROGRESS.md —— 进度是项目工件，与代码同生死。"""
+    runtime.spec_path().write_text("# spec", encoding="utf-8")
+    progress = paths.target_root() / "PROGRESS.md"
+    progress.write_text("# 进度", encoding="utf-8")
+
+    _feed(monkeypatch, "/clear", "y", "/exit")
+    session.run_interactive_session()
+
+    assert not runtime.spec_path().exists()  # spec 已删
+    assert progress.is_file()                # 进度文档保留！
 
 
 # ---------- 斜杠命令 ----------
