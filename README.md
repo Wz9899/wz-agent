@@ -70,6 +70,14 @@ cp .env.example .env   # 然后编辑 .env 填入 Key
 
 ### 3. 运行
 
+**免命令行（推荐日常用）**：
+
+- 双击 `run.bat` → 弹出文件夹选择框，选中目标项目即进入会话
+- 或把目标项目文件夹**直接拖到 run.bat 图标上**
+- 或先双击一次 `install-sendto.bat`，之后任意文件夹上**右键 → 发送到 → wz-agent-here**
+
+**命令行（脚本化/调试）**：
+
 ```bash
 # 锚定目标项目后进入会话（agent 直接在该项目里工作；默认目标 = 启动时所在目录）
 python src/main.py -C /path/to/your-project
