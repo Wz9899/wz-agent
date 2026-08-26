@@ -137,6 +137,8 @@ python src/main.py "帮我写一个猜人游戏" --safety-mode plan
 
 ## 项目结构
 
+> 架构详解：[docs/agent-architecture.md](docs/agent-architecture.md) —— 按 learn-claude-code 课程结构（s01-s17）逐章拆解 wz-agent 的实现与取舍。
+
 ```
 wz-agent/
 ├── CONTEXT.md              # 术语表 & 技术选型
