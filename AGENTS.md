@@ -25,7 +25,7 @@ Issues 以本地 markdown 文件形式存放在 `.scratch/` 下。详见 `docs/a
 
 ### 文档写作规范
 
-写培训/教学类文档（如 `docs/Agent实现原理与选型.md`）时遵守：
+写培训/教学类文档（如 `docs/Agent实现原理与选型-v2.md`）时遵守：
 
 1. **术语必须规范**：不生造叫法（如"学界四模块"），引用学术/权威框架时用规范名称与出处；拿不准先查原文
 2. **知识源优先级**：Agent 相关知识优先从 ai-agent-book 获取（本地 `D:/AI-learning/ai-agent-book`）；不参考 learn-claude-code
