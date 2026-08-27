@@ -12,10 +12,10 @@
 
 | 图 | 类型 | 对应章节 |
 |---|---|---|
-| [整体架构](diagrams/diagram-01-overview.html) | Architecture | 整体架构 |
-| [Agent 循环与错误协议](diagrams/diagram-02-loop.html) | Flowchart | Agent 循环 |
-| [任务票的一生（六状态）](diagrams/diagram-03-ticket-lifecycle.html) | State machine | 任务票 |
-| [子 agent 并行扇出](diagrams/diagram-04-fanout.html) | Sequence | 子 agent：task 工具 |
+| ![整体架构](diagrams/diagram-01-overview.png) [整体架构](diagrams/diagram-01-overview.png) · [交互版](diagrams/diagram-01-overview.html) | Architecture | 整体架构 |
+| ![Agent 循环](diagrams/diagram-02-loop.png) [Agent 循环与错误协议](diagrams/diagram-02-loop.png) · [交互版](diagrams/diagram-02-loop.html) | Flowchart | Agent 循环 |
+| ![任务票一生](diagrams/diagram-03-ticket-lifecycle.png) [任务票的一生（六状态）](diagrams/diagram-03-ticket-lifecycle.png) · [交互版](diagrams/diagram-03-ticket-lifecycle.html) | State machine | 任务票 |
+| ![并行扇出](diagrams/diagram-04-fanout.png) [子 agent 并行扇出](diagrams/diagram-04-fanout.png) · [交互版](diagrams/diagram-04-fanout.html) | Sequence | 子 agent：task 工具 |
 
 每张图为自包含 HTML（内联 SVG+CSS），双击即可在浏览器打开。
 
@@ -116,7 +116,9 @@ wz-agent 对模型的态度可以压缩成一句话：**相信大模型本身的
 
 ## 整体架构
 
-![整体架构](diagrams/diagram-01-overview.html) —— 打开 [diagrams/diagram-01-overview.html](diagrams/diagram-01-overview.html) 查看。要点：
+![整体架构](diagrams/diagram-01-overview.png)
+
+图：[diagrams/diagram-01-overview.html](diagrams/diagram-01-overview.html)（交互版）。要点：
 
 - 目标项目（虚线框）：你的文件，agent 用 read/write/edit/bash 直接操作，spec / PROGRESS / 票都落在这里；
 - harness 区：单循环 REPL 持有唯一一份持久 messages[]，基座提示在 system 位永不裁剪；
@@ -155,7 +157,7 @@ src/
 
 `loop.py` 的 `_run_loop()` 是标准的 ReAct 循环：调用 LLM → 解析 `tool_calls` →
 逐个执行并把结果 append 回消息列表 → 重复，直到模型返回纯文本（本轮结束）。
-完整流程与错误协议见图：[diagram-02-loop.html](diagrams/diagram-02-loop.html)（分支、四类哨兵错误、硬上限一图看完）。
+完整流程与错误协议见图：[diagram-02-loop.html](diagrams/diagram-02-loop.html) / ![循环流程](diagrams/diagram-02-loop.png)（分支、四类哨兵错误、硬上限一图看完）。
 
 几个值得说明的设计：
 
@@ -271,8 +273,10 @@ task(subagent="investigator", task="调查 xxx 的调用链")
 **上下文隔离。** 子 agent 收到的是任务描述副本，看不到主对话；主对话只收最终报告。
 中间产生的几十 KB 探索输出被隔离在子 agent 自己的上下文里消化。
 
-**并行扇出。** 多个互不依赖的调查问题可以一次派出去（时序图：
+**并行扇出。** 多个互不依赖的调查问题可以一次派出去（时序图见下，交互版
 [diagram-04-fanout.html](diagrams/diagram-04-fanout.html)）：
+
+![并行扇出时序](diagrams/diagram-04-fanout.png)
 
 ```
 task(subagent="investigator", task="调查这个模块",
@@ -314,8 +318,11 @@ Blocked by: 01, 03          ← 要先完成哪些票；没依赖就写"（无�
 ← 分诊结论、实现记录都追加在这里
 ```
 
-**六个状态，就是一张票的一生：** 见状态机图 [diagram-03-ticket-lifecycle.html](diagrams/diagram-03-ticket-lifecycle.html)
+**六个状态，就是一张票的一生：** 见状态机图（下）或交互版
+[diagram-03-ticket-lifecycle.html](diagrams/diagram-03-ticket-lifecycle.html)
 （橙色为唯一可开工入口 `ready-for-agent`；终态 done 需经验收；needs-info 是等人的停车区）。
+
+![任务票六状态机](diagrams/diagram-03-ticket-lifecycle.png)
 
 **流水线怎么跑，三步：**
 
