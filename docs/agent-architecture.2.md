@@ -10,15 +10,7 @@
 
 ## 图目录
 
-| 图 | 类型 | 所在章节 |
-|---|---|---|
-| 整体架构 | flowchart | 整体架构 |
-| Agent 循环与错误协议 | flowchart | Agent 循环 |
-| 任务票的一生 | stateDiagram-v2 | 任务票 |
-| 子 agent 并行扇出 | sequenceDiagram | 子 agent：task 工具 |
-
-全部以 ```mermaid 代码块内嵌，GitHub / VS Code / Typora / Obsidian 原生渲染。
-
+四张图均为 Mermaid 代码块内嵌（GitHub / VS Code 预览 / Typora / Obsidian 原生渲染），见下方各章节。
 ---
 
 ## 它能做到我需要的事吗
@@ -131,16 +123,16 @@ flowchart TB
     subgraph harness["wz-agent harness"]
         direction TB
         REPL["单循环 REPL · session.py<br/>斜杠命令 / 转录"]
-        BASE["基座提示 system[0]<br/>prompts/base.py"]
-        LOOP["ReAct 循环 · loop.py<br/>压缩>40k字符 · 重试×3"]
+        BASE["基座提示（system 首条）<br/>prompts/base.py"]
+        LOOP["ReAct 循环 · loop.py<br/>压缩超40k字符 · 重试×3"]
         TOOLS["工具集 make_tools()<br/>每循环全新实例"]
         LOG["runs/session.log<br/>转录回放"]
     end
 
-    LLM["LLM（OpenAI 兼容）<br/>DeepSeek / GLM / …"]
+    LLM["LLM · OpenAI 兼容<br/>DeepSeek / GLM 等"]
 
     REPL -- "continue_turn" --> LOOP
-    BASE -. "注入 system[0]" .-> REPL
+    BASE -. "注入首条 system" .-> REPL
     LOOP -- "tool_call" --> TOOLS
     TOOLS -- "结果回填" --> LOOP
     LOOP -- "调用（流式）" --> LLM
@@ -151,6 +143,9 @@ flowchart TB
     PROG -. "新会话先读接上进度" .-> REPL
 
     style LOOP fill:#fdeadd,stroke:#eb6c36,color:#2d3142
+```
+
+要点：目标项目（虚线区）里的 spec/PROGRESS/票/代码全部由工具直接落盘；基座提示只进 system 首位永不裁剪；转录是旁路观测。
 
 ---
 
