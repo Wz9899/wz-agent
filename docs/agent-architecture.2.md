@@ -137,6 +137,10 @@ wz-agent 对模型的态度可以压缩成一句话：**相信大模型本身的
 
 ## 整体架构
 
+> 术语说明：**REPL**（Read-Eval-Print Loop）即交互式命令行环境——读取你的一句输入、
+> 执行、打印回应、循环等待下一句。Python/Node 的交互式命令行都是这个形态。
+> wz-agent 默认进入的就是它：一句一句地对话，agent 全程不失忆。
+
 ```mermaid
 flowchart TB
     subgraph target["目标项目（用户拥有）"]
