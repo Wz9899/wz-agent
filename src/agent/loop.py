@@ -28,9 +28,18 @@ MAX_CONTEXT_CHARS: int = 40_000
 KEEP_HISTORY_ROUNDS: int = 6
 
 # ============================================================
-# DeepSeek 客户端（惰性初始化）
+# LLM 配置（OpenAI 兼容协议，默认 DeepSeek，可用环境变量切换）
 # ============================================================
-
+# 走任意 OpenAI 兼容 API：
+#   DeepSeek 默认：base_url=https://api.deepseek.com, model=deepseek-chat
+#   GLM(智谱) 示例：LLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+#                   LLM_MODEL=glm-4-flash（或 glm-4-plus 等）
+#
+# 统一读三个环境变量（都带 DeepSeek 默认值，切厂商只需在 .env 里改）：
+#   LLM_API_KEY  —— 兼容旧 DEEPSEEK_API_KEY（未设时回退）
+#   LLM_BASE_URL —— OpenAI 兼容服务地址
+#   LLM_MODEL    —— 模型名
+#
 # client 不在 import 时创建：模块加载时 os.environ 可能还没有加载 .env
 # （如 main.py 在 import agent 之后才调用 load_dotenv()）。若此时用占位符
 # sk-xxx 构造 client，之后 load_dotenv() 也不会更新已创建的实例，导致
@@ -38,13 +47,32 @@ KEEP_HISTORY_ROUNDS: int = 6
 _client: OpenAI | None = None
 
 
+# —— 配置读取函数（调用时读环境变量，确保 load_dotenv() 之后生效）——
+
+def llm_api_key() -> str:
+    """LLM API Key：优先 LLM_API_KEY，回退兼容旧 DEEPSEEK_API_KEY。"""
+    return os.environ.get("LLM_API_KEY") or os.environ.get(
+        "DEEPSEEK_API_KEY", "sk-xxx"
+    )
+
+
+def llm_base_url() -> str:
+    """LLM 服务地址：默认 DeepSeek。"""
+    return os.environ.get("LLM_BASE_URL", "https://api.deepseek.com")
+
+
+def llm_model() -> str:
+    """LLM 模型名：默认 deepseek-chat。"""
+    return os.environ.get("LLM_MODEL", "deepseek-chat")
+
+
 def _get_client() -> OpenAI:
     """惰性获取 OpenAI 客户端（首次调用时构造，之后复用）。"""
     global _client
     if _client is None:
         _client = OpenAI(
-            api_key=os.environ.get("DEEPSEEK_API_KEY", "sk-xxx"),
-            base_url="https://api.deepseek.com",
+            api_key=llm_api_key(),
+            base_url=llm_base_url(),
         )
     return _client
 
@@ -181,7 +209,7 @@ def _call_stream(
     让用户能看到 agent 的思考过程。工具调用与执行结果由 _run_loop 打印。
     """
     response = client.chat.completions.create(
-        model="deepseek-chat",
+        model=llm_model(),
         messages=messages,
         tools=tool_schemas,
         stream=True,
@@ -375,7 +403,7 @@ def _run_loop(
                 )
             else:
                 response = _get_client().chat.completions.create(
-                    model="deepseek-chat",
+                    model=llm_model(),
                     messages=messages,
                     tools=tool_schemas,
                 )

@@ -14,7 +14,6 @@
     python src/main.py "帮我写一个猜人游戏" --no-interactive
 """
 
-import os
 import sys
 from pathlib import Path
 
@@ -33,7 +32,12 @@ PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from agent import interactive, issues, paths, runtime
-from agent.loop import run_with_retry
+from agent.loop import (
+    run_with_retry,
+    llm_api_key,
+    llm_base_url,
+    llm_model,
+)
 from agent.session import run_interactive_session
 from agent.prompts import (
     TRIAGE_SYSTEM_PROMPT,
@@ -49,12 +53,12 @@ SUBCOMMANDS: tuple[str, ...] = ("triage", "to-tickets")
 
 
 def _check_api_key() -> bool:
-    """校验 DEEPSEEK_API_KEY，缺失时打印提示并返回 False。"""
-    if os.environ.get("DEEPSEEK_API_KEY"):
+    """校验 LLM API Key（LLM_API_KEY 或兼容的 DEEPSEEK_API_KEY），缺失时提示。"""
+    if llm_api_key() and llm_api_key() != "sk-xxx":
         return True
-    console.print("[red]错误：未设置 DEEPSEEK_API_KEY[/]")
-    console.print('PowerShell: [cyan]$env:DEEPSEEK_API_KEY="sk-你的key"[/]')
-    console.print('Bash:       [cyan]export DEEPSEEK_API_KEY="sk-你的key"[/]')
+    console.print("[red]错误：未设置 LLM_API_KEY（或 DEEPSEEK_API_KEY）[/]")
+    console.print('PowerShell: [cyan]$env:LLM_API_KEY="你的key"[/]')
+    console.print('Bash:       [cyan]export LLM_API_KEY="你的key"[/]')
     return False
 
 

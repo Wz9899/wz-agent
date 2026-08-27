@@ -10,9 +10,14 @@ import agent.loop as loop
 
 
 def test_get_client_reads_current_env(monkeypatch):
-    """client 应从当前环境变量构造，而非 import 时的值。"""
+    """client 应从当前环境变量构造，且 LLM_API_KEY 优先于 DEEPSEEK_API_KEY。"""
+    # 先删掉两个 key：main.py 在 import 时 load_dotenv(.env)，
+    # 同进程先跑的测试会把 .env 里的 LLM_API_KEY 泄漏进 os.environ
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     monkeypatch.setattr(loop, "_client", None)          # 重置惰性缓存
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "env-test-key")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "old-key")
+    monkeypatch.setenv("LLM_API_KEY", "env-test-key")
     client = loop._get_client()
     assert client.api_key == "env-test-key"
 
@@ -27,8 +32,9 @@ def test_get_client_is_cached(monkeypatch):
 
 
 def test_get_client_falls_back_to_placeholder(monkeypatch):
-    """环境变量缺失时保持原占位符行为（由调用方前置校验兜底）。"""
+    """两个 key 都缺失时保持占位符行为（由调用方前置校验兜底）。"""
     monkeypatch.setattr(loop, "_client", None)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     assert loop._get_client().api_key == "sk-xxx"
 
