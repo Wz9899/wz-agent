@@ -73,6 +73,8 @@
 | 防自噬护栏 | `main.py` is_self_harness + --allow-self —— 目标落在 wz-agent 自身仓库内时拒绝（agent 无自我模型，会把 harness 当用户项目甚至改自己源码）；自举开发显式放行 | ✅ |
 | 自杀守卫 | `bash.py` 拦 taskkill /IM python（按映像名全杀，实测事故：agent 清理泄漏的 Flask 时把自己宿主也杀了）+ 拦任何针对自身 PID 的 kill；base.py 加后台进程纪律（start /b 会逃出进程树；清理用 PID） | ✅ |
 | git 边界 | harness 零 git 调用；agent 可读不可写（prompt 级）；/clear 只删 spec 不碰项目文件 | ✅ |
+| 模型可配置 | `loop.py` llm_api_key/base_url/model 三函数 —— OpenAI 兼容协议，LLM_* 环境变量切换厂商（默认 DeepSeek，兼容旧 DEEPSEEK_API_KEY）；.env.example 给 GLM 示例 | ✅ 测试全绿 |
+| pi 式简短回复 | `prompts/base.py` —— 文字只承担结论/决策/待拍板项，过程细节归工具调用轨迹（流式打印），删“每步解释”纪律；连带修 env 泄漏下的两个 _get_client 测试 | ✅ 157 项全绿 |
 
 ## 待完成
 
