@@ -1,4 +1,4 @@
-"""临时测试：验证 DeepSeek API 调用是否正常。"""
+"""临时测试：验证 LLM API 调用是否正常（当前 .env 配置的模型）。"""
 
 import os
 import sys
@@ -6,16 +6,15 @@ import sys
 # 把 src 加入路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
-# 加载 .env 文件（如果有的话）
+# 加载项目根的 .env（与 cwd 无关）
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
-from agent.loop import run
+from agent.loop import run, llm_api_key
 
-if not os.environ.get("DEEPSEEK_API_KEY"):
-    print("错误：请设置环境变量 DEEPSEEK_API_KEY")
-    print("  export DEEPSEEK_API_KEY=sk-xxxx   (Linux/Mac)")
-    print("  set DEEPSEEK_API_KEY=sk-xxxx      (Windows)")
+if llm_api_key() in ("", "sk-xxx"):
+    print("错误：请在 .env 或环境变量里设置 LLM_API_KEY（或 DEEPSEEK_API_KEY）")
+    print("  参考 .env.example 的配置说明")
     sys.exit(1)
 
 result = run(

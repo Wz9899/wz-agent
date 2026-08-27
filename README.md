@@ -51,21 +51,34 @@ examples/nba-wordle/
 pip install -r requirements.txt
 ```
 
-### 2. 设置 API Key
+### 2. 配置模型（`.env`）
 
-**PowerShell:**
+`.env` 不进 git（含 key），需手动创建：
+
+```bash
+cp .env.example .env   # 然后编辑填入 Key
+```
+
+**用 GLM（智谱 Coding Plan）**：
+```ini
+LLM_API_KEY=你的智谱key
+LLM_BASE_URL=https://open.bigmodel.cn/api/coding/paas/v4
+LLM_MODEL=glm-5.3-flash
+```
+> Coding Plan 的 key 必须走 `/api/coding/paas/v4` 端点，普通 `/api/paas/v4` 会报 429 无可用资源包。
+
+**用 DeepSeek（默认，只填 key 即可）**：
+```ini
+DEEPSEEK_API_KEY=sk-你的key
+```
+
+**或临时用环境变量**（优先级高于 `.env`）：
+
 ```powershell
-$env:DEEPSEEK_API_KEY="sk-你的key"
+$env:LLM_API_KEY="你的key"          # PowerShell
 ```
-
-**Git Bash / Linux / Mac:**
 ```bash
-export DEEPSEEK_API_KEY="sk-你的key"
-```
-
-**或使用 `.env` 文件**（推荐，自动加载）:
-```bash
-cp .env.example .env   # 然后编辑 .env 填入 Key
+export LLM_API_KEY="你的key"        # Git Bash / Linux / Mac
 ```
 
 ### 3. 运行
