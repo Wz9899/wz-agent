@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -65,6 +66,11 @@ class BashTool(BaseTool):
         "> /dev/sda",
         "chmod -R 777 /",
     )
+
+    # 自杀式清理：按映像名全杀 python 会连 wz-agent 自己的宿主进程一起杀
+    # （实测事故：agent 为清理泄漏的 Flask 跑 taskkill /IM python.exe，
+    # 窗口直接消失，连 pause 都没执行到）。要清后台进程必须用 PID。
+    _SELF_KILL_IM_RE = re.compile(r"taskkill\s+/im\s+python", re.IGNORECASE)
 
     # --------------------------------------------------------
     # 实例状态
@@ -231,6 +237,26 @@ class BashTool(BaseTool):
         for dangerous in self._DANGEROUS_PREFIXES:
             if dangerous in stripped:
                 return f"拒绝执行危险命令 —— 命令包含 '{dangerous}'"
+
+        # 自杀式清理（按映像名全杀）：给可行动的替代方案（杀 PID 不杀映像名）
+        if self._SELF_KILL_IM_RE.search(stripped):
+            return (
+                "拒绝执行 taskkill /IM python —— 这会连带杀掉 wz-agent 自己。"
+                "清理后台进程请用 PID：先 netstat/tasklist 找到 PID，"
+                "再 taskkill /PID <pid> /F。"
+            )
+
+        # 自杀守卫（跨形态）：任何以当前进程 PID 为目标的 kill/taskkill 都拦。
+        # 形态各异（kill /PID n、taskkill /pid n、powershell Stop-Process -Id n），
+        # 用当前 PID 是否作为独立数字出现来判定。
+        me = str(os.getpid())
+        if re.search(r"(?<![0-9])" + me + r"(?![0-9])", stripped) and re.search(
+            r"taskkill|kill|stop-process", stripped, re.IGNORECASE
+        ):
+            return (
+                f"拒绝执行 —— 目标 PID {me} 是 wz-agent 自己的进程。"
+                "如需终止后台服务，请针对该服务的 PID 操作。"
+            )
         return None
 
     def _execute(self, command: str) -> str:

@@ -167,3 +167,44 @@ def test_execute_timeout_kills_process_tree(monkeypatch):
     out = tool._execute_one("some long command")
     assert "超时" in out
     assert killed == [777]
+
+
+# ---------- v2.5+: 自杀守卫（实测事故驱动）----------
+
+
+def test_im_python_kill_blocked_with_pid_hint():
+    """taskkill /IM python 按映像名全杀 → 拦截并提示用 PID（大小写/前缀变体）。"""
+    tool = BashTool()
+    for cmd in (
+        "cd C:/x && taskkill /IM python.exe /F 2>nul & echo cleaned",
+        "taskkill /im python.exe",
+        "TASKKILL /IM Python.exe /F",
+    ):
+        r = tool._check_dangerous(cmd)
+        assert r is not None, cmd
+        assert "PID" in r and "wz-agent" in r
+
+
+def test_pid_kill_allowed():
+    """按 PID 杀其他进程是正常操作 → 放行。"""
+    tool = BashTool()
+    assert tool._check_dangerous("taskkill /PID 12345 /F") is None
+
+
+def test_self_pid_kill_blocked():
+    """杀当前进程自己的 PID（任何形态）→ 拦截。"""
+    import os
+    tool = BashTool()
+    me = os.getpid()
+    for cmd in (f"taskkill /PID {me} /F", f"kill -9 {me}"):
+        r = tool._check_dangerous(cmd)
+        assert r is not None, cmd
+        assert "自己" in r or "wz-agent" in r
+
+
+def test_self_pid_number_in_normal_command_not_blocked():
+    """命令里出现同数字但不带 kill 语义 → 不误伤。"""
+    import os
+    tool = BashTool()
+    me = os.getpid()
+    assert tool._check_dangerous(f"echo {me} is a number && ls") is None
