@@ -4,20 +4,22 @@
 > 逐个说明它在 wz-agent 中如何实现、有哪些考虑。
 >
 > 规模：约 3.3k 行 Python。支持任何 OpenAI 兼容 API（默认 DeepSeek）。158 项测试。
-> **图示版**：架构相关内容以 HTML 图示呈现（diagrams/diagram-01～04，浏览器直接打开），文字版见 [agent-architecture.md](agent-architecture.md)。
+> **图示版**：架构内容以 Mermaid 图呈现（GitHub / VS Code / Typora 直接渲染），文字版见 [agent-architecture.md](agent-architecture.md)。
 
 ---
 
 ## 图目录
 
-| 图 | 类型 | 对应章节 |
+| 图 | 类型 | 所在章节 |
 |---|---|---|
-| ![整体架构](diagrams/diagram-01-overview.png)<br>[交互版 HTML](diagrams/diagram-01-overview.html) | Architecture | 整体架构 |
-| ![Agent 循环](diagrams/diagram-02-loop.png)<br>[交互版 HTML](diagrams/diagram-02-loop.html) | Flowchart | Agent 循环 |
-| ![任务票一生](diagrams/diagram-03-ticket-lifecycle.png)<br>[交互版 HTML](diagrams/diagram-03-ticket-lifecycle.html) | State machine | 任务票 |
-| ![并行扇出](diagrams/diagram-04-fanout.png)<br>[交互版 HTML](diagrams/diagram-04-fanout.html) | Sequence | 子 agent：task 工具 |
+| 整体架构 | flowchart | 整体架构 |
+| Agent 循环与错误协议 | flowchart | Agent 循环 |
+| 任务票的一生 | stateDiagram-v2 | 任务票 |
+| 子 agent 并行扇出 | sequenceDiagram | 子 agent：task 工具 |
 
-每张图为自包含 HTML（内联 SVG+CSS），双击即可在浏览器打开。
+全部以 ```mermaid 代码块内嵌，GitHub / VS Code / Typora / Obsidian 原生渲染。
+
+---
 
 ## 它能做到我需要的事吗
 
@@ -116,40 +118,38 @@ wz-agent 对模型的态度可以压缩成一句话：**相信大模型本身的
 
 ## 整体架构
 
-![整体架构](diagrams/diagram-01-overview.png)
+```mermaid
+flowchart TB
+    subgraph target["目标项目（用户拥有）"]
+        direction LR
+        SPEC["spec.md<br/>需求唯一权威"]
+        PROG["PROGRESS.md<br/>进度唯一权威"]
+        TICKET[".scratch/<feature>/issues/<br/>任务票"]
+        CODE["你的代码<br/>git 归你管"]
+    end
 
-图：[diagrams/diagram-01-overview.html](diagrams/diagram-01-overview.html)（交互版）。要点：
+    subgraph harness["wz-agent harness"]
+        direction TB
+        REPL["单循环 REPL · session.py<br/>斜杠命令 / 转录"]
+        BASE["基座提示 system[0]<br/>prompts/base.py"]
+        LOOP["ReAct 循环 · loop.py<br/>压缩>40k字符 · 重试×3"]
+        TOOLS["工具集 make_tools()<br/>每循环全新实例"]
+        LOG["runs/session.log<br/>转录回放"]
+    end
 
-- 目标项目（虚线框）：你的文件，agent 用 read/write/edit/bash 直接操作，spec / PROGRESS / 票都落在这里；
-- harness 区：单循环 REPL 持有唯一一份持久 messages[]，基座提示在 system 位永不裁剪；
-- **焦点（橙框）是 ReAct 循环**——它是唯一直接驱动工具的地方，工厂每次循环构造全新实例；
-- 转录 session.log 是旁路观测（虚线），不参与决策。
+    LLM["LLM（OpenAI 兼容）<br/>DeepSeek / GLM / …"]
 
-```
-src/
-├── main.py                 入口：目标目录(-C)、子命令分发
-├── agent/
-│   ├── loop.py             ReAct 循环、流式输出、压缩、自动修复、中断菜单
-│   ├── session.py          单循环 REPL：输入分发、斜杠命令、转录
-│   ├── paths.py            PROJECT_ROOT(wz-agent 自身) / TARGET_ROOT(目标项目)
-│   ├── runtime.py          runs/ 转录目录；spec_path 指向目标项目根
-│   ├── context.py          spec.md 定位/读写/校验
-│   ├── issues.py           .scratch/ 票的文件操作层（Status/Blocked by 解析）
-│   ├── interactive.py      Ctrl-C 中断菜单、人机 IO、完成判定
-│   ├── prompts/
-│   │   ├── base.py         交互会话的唯一系统提示（路由规则+三种模式+纪律）
-│   │   ├── triage.py       分诊提示（六档标签、评论模板）
-│   │   └── to_tickets.py   拆票提示（垂直切片）
-│   └── tools/
-│       ├── __init__.py     TOOL_CLASSES 目录 + make_tools() 工厂
-│       ├── base.py         BaseTool：run() 签名反射生成 JSON Schema
-│       ├── read/write/edit/bash
-│       ├── interact.py     ask_user / checkpoint
-│       ├── task.py         子 agent 注册表 + 并行扇出
-│       └── triage.py tickets.py    issue 三工具
-├── run.bat                 图形化启动（文件夹选择框 / 拖拽 / 发送到）
-└── install-sendto.bat      安装右键"发送到 wz-agent-here"
-```
+    REPL -- "continue_turn" --> LOOP
+    BASE -. "注入 system[0]" .-> REPL
+    LOOP <--> "tool_call / 结果回填" TOOLS
+    LOOP -- "调用（流式）" --> LLM
+    TOOLS -- "直接落盘" --> CODE
+    TOOLS -- "读写校验" --> SPEC
+    TOOLS -- "按票实现" --> TICKET
+    LOOP -- "全程记录" --> LOG
+    PROG -. "新会话先读接上进度" .-> REPL
+
+    style LOOP fill:#fdeadd,stroke:#eb6c36,color:#2d3142
 
 ---
 
@@ -157,7 +157,22 @@ src/
 
 `loop.py` 的 `_run_loop()` 是标准的 ReAct 循环：调用 LLM → 解析 `tool_calls` →
 逐个执行并把结果 append 回消息列表 → 重复，直到模型返回纯文本（本轮结束）。
-完整流程与错误协议见图：[diagram-02-loop.html](diagrams/diagram-02-loop.html) / ![循环流程](diagrams/diagram-02-loop.png)（分支、四类哨兵错误、硬上限一图看完）。
+完整流程与错误协议：
+
+```mermaid
+flowchart TB
+    IN["用户输入 / 上一轮结果"] --> LLM["调 LLM（流式，带工具集）"]
+    LLM -- "有 tool_calls" --> EXEC["执行工具（make_tools 实例）<br/>结果截断2000字符 · bash 30s超时"]
+    EXEC -- "结果回填" --> LLM
+    LLM -- "纯文本" --> DONE["本轮结束 → 回 REPL"]
+    EXEC -. "工具失败/未完成" .-> RETRY["[ERR]/[WARN] 失败详情回喂<br/>自动修复重试 ×3"]
+    RETRY -- "重试仍失败 → 返回错误文本" --> DONE
+    LLM -- "限流/断网" --> APIERR["[API-ERR] 直接返回"]
+
+    style RETRY fill:#fdeadd,stroke:#eb6c36,color:#2d3142
+```
+
+硬上限：`max_steps=30`；单条工具结果 >2000 字符截断。
 
 几个值得说明的设计：
 
@@ -273,10 +288,32 @@ task(subagent="investigator", task="调查 xxx 的调用链")
 **上下文隔离。** 子 agent 收到的是任务描述副本，看不到主对话；主对话只收最终报告。
 中间产生的几十 KB 探索输出被隔离在子 agent 自己的上下文里消化。
 
-**并行扇出。** 多个互不依赖的调查问题可以一次派出去（时序图见下，交互版
-[diagram-04-fanout.html](diagrams/diagram-04-fanout.html)）：
+**并行扇出。** 多个互不依赖的调查问题可以一次派出去：
 
-![并行扇出时序](diagrams/diagram-04-fanout.png)
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as 开发者
+    participant M as 主对话/循环
+    participant I1 as investigator 1
+    participant I2 as investigator 2
+    participant I3 as investigator 3
+
+    U->>M: 调查这个模块 + fan_out[问题1, 问题2, 问题3]
+    par 并行派发（每线程独立 messages + make_tools 实例）
+        M->>I1: 只调查问题1
+        M->>I2: 只调查问题2
+        M->>I3: 只调查问题3
+    end
+    I2-->>M: 结论2
+    I1-->>M: 结论1
+    I3-->>M: 结论3
+    Note over M: 按子问题原序聚合（非完成序）
+    M-->>U: 一份聚合工具结果回主对话
+```
+
+守卫：只读角色才可扇出（含 write/edit 的 coder 拒绝）；`MAX_FAN_OUT=4`；
+Ctrl-C 时取消未启动线程、在跑的自然收尾，交给中断菜单。
 
 ```
 task(subagent="investigator", task="调查这个模块",
@@ -318,11 +355,28 @@ Blocked by: 01, 03          ← 要先完成哪些票；没依赖就写"（无�
 ← 分诊结论、实现记录都追加在这里
 ```
 
-**六个状态，就是一张票的一生：** 见状态机图（下）或交互版
-[diagram-03-ticket-lifecycle.html](diagrams/diagram-03-ticket-lifecycle.html)
-（橙色为唯一可开工入口 `ready-for-agent`；终态 done 需经验收；needs-info 是等人的停车区）。
+**六个状态，就是一张票的一生：**
 
-![任务票六状态机](diagrams/diagram-03-ticket-lifecycle.png)
+```mermaid
+stateDiagram-v2
+    [*] --> needsInfo: 刚拆出来
+    note right of needsInfo: needs-triage 待评估
+
+    needsInfo --> readyForAgent: 描述完整可开工
+    needsInfo --> humanState: 该人干
+    needsInfo --> wontfix: 不做
+
+    state "ready-for-agent（唯一可开工入口）" as readyForAgent
+    readyForAgent --> coding: /code 派 coder
+    coding --> done: 验收通过 · PROGRESS 记账
+    coding --> needsInfo: 连败3次·附卡点
+
+    state "done 终态" as done
+    state "wontfix 终态" as wontfix
+    state "needs-info 等人区" as needsInfo
+    state "ready-for-human" as humanState
+```
+
 
 **流水线怎么跑，三步：**
 
