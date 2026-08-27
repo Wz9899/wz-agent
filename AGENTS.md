@@ -18,6 +18,10 @@ Issues 以本地 markdown 文件形式存放在 `.scratch/` 下。详见 `docs/a
 2. 改动代码前先读相关源文件，理解现状再动手
 3. 每完成一个模块，更新 `PROGRESS.md` 的"已完成/待完成"
 4. 开发中踩的坑记入 `docs/开发问题记录.md`
+5. **写或改 agent 消费的文本前**（系统提示词 `prompts/*.py`、本文件、CONTEXT.md、
+   PROGRESS.md 约定），先读 skill `writing-for-agents`（~/.claude/skills/ 或
+   ~/.pi/agent/skills/），按它的杠杆自检：context pointer 措辞（must-have 目标
+   配强指针）、分支显式化、正向表述而非禁止、单一事实源、逐句无 no-op。
 
 ### 文档写作规范
 
