@@ -124,7 +124,7 @@ flowchart TB
         direction LR
         SPEC["spec.md<br/>需求唯一权威"]
         PROG["PROGRESS.md<br/>进度唯一权威"]
-        TICKET[".scratch/<feature>/issues/<br/>任务票"]
+        TICKET[".scratch/feature/issues/<br/>任务票一票一文件"]
         CODE["你的代码<br/>git 归你管"]
     end
 
@@ -141,7 +141,8 @@ flowchart TB
 
     REPL -- "continue_turn" --> LOOP
     BASE -. "注入 system[0]" .-> REPL
-    LOOP <--> "tool_call / 结果回填" TOOLS
+    LOOP -- "tool_call" --> TOOLS
+    TOOLS -- "结果回填" --> LOOP
     LOOP -- "调用（流式）" --> LLM
     TOOLS -- "直接落盘" --> CODE
     TOOLS -- "读写校验" --> SPEC
@@ -165,9 +166,9 @@ flowchart TB
     LLM -- "有 tool_calls" --> EXEC["执行工具（make_tools 实例）<br/>结果截断2000字符 · bash 30s超时"]
     EXEC -- "结果回填" --> LLM
     LLM -- "纯文本" --> DONE["本轮结束 → 回 REPL"]
-    EXEC -. "工具失败/未完成" .-> RETRY["[ERR]/[WARN] 失败详情回喂<br/>自动修复重试 ×3"]
+    EXEC -. "工具失败/未完成" .-> RETRY["ERR/WARN 失败详情回喂<br/>自动修复重试 ×3"]
     RETRY -- "重试仍失败 → 返回错误文本" --> DONE
-    LLM -- "限流/断网" --> APIERR["[API-ERR] 直接返回"]
+    LLM -- "限流/断网" --> APIERR["API-ERR 直接返回"]
 
     style RETRY fill:#fdeadd,stroke:#eb6c36,color:#2d3142
 ```
