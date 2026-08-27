@@ -113,36 +113,26 @@ wz-agent 对模型的态度可以压缩成一句话：**相信大模型本身的
 ```mermaid
 flowchart TB
     subgraph target["目标项目（用户拥有）"]
-        direction LR
-        SPEC["spec.md<br/>需求唯一权威"]
-        PROG["PROGRESS.md<br/>进度唯一权威"]
-        TICKET[".scratch/feature/issues/<br/>任务票一票一文件"]
-        CODE["你的代码<br/>git 归你管"]
+        STATE["spec.md · PROGRESS.md · 任务票<br/>文件即状态"]
+        CODE["你的代码（git 归你管）"]
     end
 
     subgraph harness["wz-agent harness"]
-        direction TB
-        REPL["单循环 REPL · session.py<br/>斜杠命令 / 转录"]
-        BASE["基座提示（system 首条）<br/>prompts/base.py"]
-        LOOP["ReAct 循环 · loop.py<br/>压缩超40k字符 · 重试×3"]
-        TOOLS["工具集 make_tools()<br/>每循环全新实例"]
-        LOG["runs/session.log<br/>转录回放"]
+        REPL["单循环 REPL<br/>斜杠命令 · 持久对话历史 · 转录 session.log"]
+        LOOP["ReAct 循环（loop.py）<br/>压缩超40k字符 · 失败重试×3"]
+        TOOLS["工具集 make_tools()<br/>read/write/edit/bash · ask_user · task 等"]
     end
 
-    LLM["LLM · OpenAI 兼容<br/>DeepSeek / GLM 等"]
+    LLM["LLM · OpenAI 兼容"]
 
     REPL -- "continue_turn" --> LOOP
-    BASE -. "注入首条 system" .-> REPL
-    LOOP -- "tool_call" --> TOOLS
-    TOOLS -- "结果回填" --> LOOP
+    LOOP <-- "tool_call / 结果回填" --> TOOLS
     LOOP -- "调用（流式）" --> LLM
-    TOOLS -- "直接落盘" --> CODE
-    TOOLS -- "读写校验" --> SPEC
-    TOOLS -- "按票实现" --> TICKET
-    LOOP -- "全程记录" --> LOG
-    PROG -. "新会话先读接上进度" .-> REPL
+    TOOLS -- "直接读写" --> CODE
+    TOOLS -- "读需求 · 写进度 · 按票实现" --> STATE
+```
 
-    style LOOP fill:#fdeadd,stroke:#eb6c36,color:#2d3142
+> 双向边 = 循环与工具集的往返；未画的接缝：基座提示只进 system 首位永不裁剪，转录随循环写入。
 ```
 
 要点：目标项目（虚线区）里的 spec/PROGRESS/票/代码全部由工具直接落盘；基座提示只进 system 首位永不裁剪；转录是旁路观测。
