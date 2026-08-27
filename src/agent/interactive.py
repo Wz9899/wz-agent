@@ -21,7 +21,8 @@ from agent import runtime
 ENABLED: bool = True
 
 # 对话循环的终止前缀：命中这些开头的回复 → 本轮结束
-TERMINAL_PREFIXES: tuple[str, ...] = ("[DONE]", "[ERR]", "[WARN]", "[API-ERR]", "[ABORT]")
+# v2.2 起为四类哨兵协议（[ERR]/[WARN] 可重试、[API-ERR]/[ABORT] 不重试）；[DONE] 协议已退役
+TERMINAL_PREFIXES: tuple[str, ...] = ("[ERR]", "[WARN]", "[API-ERR]", "[ABORT]")
 
 
 # ============================================================
@@ -104,10 +105,10 @@ def handle_interrupt(messages: list[dict]) -> Literal["resume", "abort", "inject
 
 
 def is_terminal(result: str) -> bool:
-    """对话循环终止判定：空串或以 TERMINAL_PREFIXES 任一开头。
+    """对话循环终止判定：空串或以哨兵协议前缀（TERMINAL_PREFIXES）任一开头。
 
-    clarify 的完成约定：agent 写全部 spec.md 后回复以 [DONE] 开头。
-    普通问题文本（非这些前缀）返回 False —— 对话循环继续等用户回答。
+    命中哨兵说明本轮已结束（错误需修复、基础设施故障、或用户中止）；
+    普通问题文本返回 False —— 对话循环继续等用户回答。
     """
     if not result:
         return True

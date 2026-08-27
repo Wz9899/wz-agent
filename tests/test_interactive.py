@@ -12,10 +12,6 @@ def test_is_terminal_empty():
     assert interactive.is_terminal("")
 
 
-def test_is_terminal_done_prefix():
-    assert interactive.is_terminal("[DONE] 需求已整理完毕，写入 spec.md。")
-
-
 def test_is_terminal_error_prefixes():
     for prefix in ("[ERR]", "[WARN]", "[API-ERR]", "[ABORT]"):
         assert interactive.is_terminal(f"{prefix} xxx"), prefix

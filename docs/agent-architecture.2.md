@@ -12,10 +12,10 @@
 
 | 图 | 类型 | 对应章节 |
 |---|---|---|
-| ![整体架构](diagrams/diagram-01-overview.png) [整体架构](diagrams/diagram-01-overview.png) · [交互版](diagrams/diagram-01-overview.html) | Architecture | 整体架构 |
-| ![Agent 循环](diagrams/diagram-02-loop.png) [Agent 循环与错误协议](diagrams/diagram-02-loop.png) · [交互版](diagrams/diagram-02-loop.html) | Flowchart | Agent 循环 |
-| ![任务票一生](diagrams/diagram-03-ticket-lifecycle.png) [任务票的一生（六状态）](diagrams/diagram-03-ticket-lifecycle.png) · [交互版](diagrams/diagram-03-ticket-lifecycle.html) | State machine | 任务票 |
-| ![并行扇出](diagrams/diagram-04-fanout.png) [子 agent 并行扇出](diagrams/diagram-04-fanout.png) · [交互版](diagrams/diagram-04-fanout.html) | Sequence | 子 agent：task 工具 |
+| ![整体架构](diagrams/diagram-01-overview.png)<br>[交互版 HTML](diagrams/diagram-01-overview.html) | Architecture | 整体架构 |
+| ![Agent 循环](diagrams/diagram-02-loop.png)<br>[交互版 HTML](diagrams/diagram-02-loop.html) | Flowchart | Agent 循环 |
+| ![任务票一生](diagrams/diagram-03-ticket-lifecycle.png)<br>[交互版 HTML](diagrams/diagram-03-ticket-lifecycle.html) | State machine | 任务票 |
+| ![并行扇出](diagrams/diagram-04-fanout.png)<br>[交互版 HTML](diagrams/diagram-04-fanout.html) | Sequence | 子 agent：task 工具 |
 
 每张图为自包含 HTML（内联 SVG+CSS），双击即可在浏览器打开。
 

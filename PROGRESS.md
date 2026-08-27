@@ -62,17 +62,17 @@
 | 子 agent 派发 | `tools/task.py` — task 工具（investigator/coder），LLM 自主决策、独立上下文、递归防线 | ✅ 已验证（DeepSeek 全链路） |
 | 工具集注入 | `loop.py` — run()/_run_loop() 新增 tools 参数，支持受限注册表 | ✅ |
 | Windows bash 修复 | `tools/bash.py` — Windows 下用 git-bash 执行（临时脚本法），POSIX 语法不再撞 cmd 墙 | ✅ 已验证 |
-| 单循环会话重构 | `prompts/base.py` + `loop.py:continue_turn` + `session.py` 重写 —— 删意图分类器与三层会话，澄清/编码/修改在同一对话模型自路由；[DONE] 协议退役 | ✅ 129 测试全绿 |
+| 单循环会话重构 | `prompts/base.py` + `loop.py:continue_turn` + `session.py` 重写 —— 删意图分类器与三层会话，澄清/编码/修改在同一对话模型自路由；[DONE] 协议退役 | ✅ |
 | 播种会话 | `main.py` —— 命令行任务参数直接进 REPL（pi 式），删 --phase；--no-interactive 保留 headless 出口 | ✅ |
 | 目标项目锚定 | `paths.set_target` + `main.py -C` —— agent 直接在目标项目工作，spec/.scratch/落目标根；runs/ 只留转录（目录名带项目名）；删 output/ 沙箱 | ✅ |
 | 进度文档（项目快照） | `base.py` prompt 纪律 + `/progress` 命令 —— 编码时同步维护目标项目 PROGRESS.md，会话启动先读它接上进度；跨会话状态 = spec + PROGRESS，零记忆机制 | ✅ |
 | 工具工厂 | `tools/__init__.py` —— TOOL_CLASSES 目录 + make_tools() 每循环全新实例，删 ALL_TOOLS 单例；plan 生命周期对齐一次 _run_loop | ✅ |
 | schema 类型修复 | `tools/base.py` —— eval_str 求值注解 + list→array + X\|None 解包（append 的 boolean 此前一直误判 string） | ✅ |
-| 并行扇出 | `tools/task.py` —— fan_out 线程池并行调查，按序聚合；只读护栏 + MAX_FAN_OUT=4；Ctrl-C 走中断菜单 | ✅ 144 测试全绿 |
-| 按票实现（票即任务） | `base.py` 模式二之按票流程 + `issues.py` done 标签/get_blocked_by/ticket_stem + triage 评论模板 —— to-tickets→triage→逐票派 coder→置 done→PROGRESS 记账，issue 线闭环 | ✅ 149 测试全绿 |
-| 防自噬护栏 | `main.py` is_self_harness + --allow-self —— 目标落在 wz-agent 自身仓库内时拒绝（agent 无自我模型，会把 harness 当用户项目甚至改自己源码）；自举开发显式放行 | ✅ 154 测试全绿 |
+| 并行扇出 | `tools/task.py` —— fan_out 线程池并行调查，按序聚合；只读护栏 + MAX_FAN_OUT=4；Ctrl-C 走中断菜单 | ✅ |
+| 按票实现（票即任务） | `base.py` 模式二之按票流程 + `issues.py` done 标签/get_blocked_by/ticket_stem + triage 评论模板 —— to-tickets→triage→逐票派 coder→置 done→PROGRESS 记账，issue 线闭环 | ✅ |
+| 防自噬护栏 | `main.py` is_self_harness + --allow-self —— 目标落在 wz-agent 自身仓库内时拒绝（agent 无自我模型，会把 harness 当用户项目甚至改自己源码）；自举开发显式放行 | ✅ |
 | 自杀守卫 | `bash.py` 拦 taskkill /IM python（按映像名全杀，实测事故：agent 清理泄漏的 Flask 时把自己宿主也杀了）+ 拦任何针对自身 PID 的 kill；base.py 加后台进程纪律（start /b 会逃出进程树；清理用 PID） | ✅ |
-| git 边界 | harness 零 git 调用；agent 可读不可写（prompt 级）；/clear 只删 spec 不碰项目文件 | ✅ 136 测试全绿 |
+| git 边界 | harness 零 git 调用；agent 可读不可写（prompt 级）；/clear 只删 spec 不碰项目文件 | ✅ |
 
 ## 待完成
 
@@ -95,3 +95,4 @@
 - LLM: DeepSeek (`deepseek-chat`, OpenAI 兼容 API)
 - CLI: click
 - UI: rich
+- 测试: 158 项（`python -m pytest -q` 全绿）
